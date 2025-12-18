@@ -37,10 +37,10 @@ gcloud run deploy talkbridge-backend \
 
 ```bash
 # Create ElevenLabs API key secret
-echo -n "sk_4b4dd327937416c9904f9ab9d8b09a0a55916070669dfad6" | gcloud secrets create ELEVENLABS_API_KEY --data-file=-
+echo -n "your-elevenlabs-api-key" | gcloud secrets create ELEVENLABS_API_KEY --data-file=-
 
 # Create Gemini API key secret
-echo -n "AIzaSyANWtgRIOiINuRQH3WyLXngCyvudzk_nTk" | gcloud secrets create GEMINI_API_KEY --data-file=-
+echo -n "your-gemini-api-key" | gcloud secrets create GEMINI_API_KEY --data-file=-
 ```
 
 ### 3. Alternative: Using Dockerfile
