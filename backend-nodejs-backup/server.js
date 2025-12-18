@@ -15,7 +15,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
 app.use(express.json());
@@ -123,10 +123,7 @@ wss.on('connection', (ws) => {
         } catch (jsonError) {
           // Not JSON, treat as binary audio data
           if (recognizeStream) {
-            console.log(`🎵 Received audio chunk: ${message.length} bytes`);
             recognizeStream.write(message);
-          } else {
-            console.warn('⚠️ Received audio data but no recognition stream active');
           }
           return;
         }
@@ -152,9 +149,7 @@ wss.on('connection', (ws) => {
   // Handler functions
   async function handleCreateRoom(ws, data) {
     const roomId = generateRoomId();
-    userId = data.userId || Date.now().toString(); // Use provided userId or generate one
-
-    console.log(`📝 Creating room with userId: ${userId}`);
+    userId = Date.now().toString();
 
     // Create session in database
     const sessionId = historyService.createSession(
@@ -194,9 +189,7 @@ wss.on('connection', (ws) => {
 
   async function handleJoinRoom(ws, data) {
     const roomId = data.roomId.toUpperCase();
-    userId = data.userId || Date.now().toString(); // Use provided userId or generate one
-
-    console.log(`📝 Joining room with userId: ${userId}`);
+    userId = Date.now().toString();
 
     if (!rooms.has(roomId)) {
       ws.send(JSON.stringify({
@@ -232,17 +225,6 @@ wss.on('connection', (ws) => {
 
     const participant = rooms.get(currentRoom).participants.get(userId);
 
-    // Close existing stream if any to prevent orphaned streams
-    if (recognizeStream) {
-      console.log(`⚠️ Closing existing recognition stream before starting new one`);
-      try {
-        recognizeStream.end();
-      } catch (err) {
-        console.error('Error closing old stream:', err);
-      }
-      recognizeStream = null;
-    }
-
     console.log(`🎤 ${participant.name} started speaking in ${getLanguageName(participant.language)}`);
 
     // Create speech recognition stream
@@ -250,7 +232,6 @@ wss.on('connection', (ws) => {
       getLanguageName(participant.language),
       async (result) => {
         const { text, isFinal } = result;
-        console.log(`📝 Recognition result - Text: "${text}", Final: ${isFinal}`);
 
         // Send transcript to speaker
         ws.send(JSON.stringify({
@@ -261,7 +242,6 @@ wss.on('connection', (ws) => {
 
         // If final, translate and broadcast to others
         if (isFinal) {
-          console.log(`✅ Final transcript: "${text}"`);
           await translateAndBroadcast(currentRoom, userId, text, participant.language, participant.name);
         }
       },
@@ -292,17 +272,6 @@ wss.on('connection', (ws) => {
 
     const participant = rooms.get(currentRoom).participants.get(userId);
 
-    // Close existing stream if any
-    if (recognizeStream) {
-      console.log(`⚠️ Closing existing recognition stream before starting agent query`);
-      try {
-        recognizeStream.end();
-      } catch (err) {
-        console.error('Error closing old stream:', err);
-      }
-      recognizeStream = null;
-    }
-
     console.log(`🤖 ${participant.name} asking agent`);
 
     recognizeStream = speechService.createRecognizeStream(
@@ -325,17 +294,6 @@ wss.on('connection', (ws) => {
   }
 
   async function handlePersonalModeStart(ws, data) {
-    // Close existing stream if any
-    if (recognizeStream) {
-      console.log(`⚠️ Closing existing recognition stream before starting personal mode`);
-      try {
-        recognizeStream.end();
-      } catch (err) {
-        console.error('Error closing old stream:', err);
-      }
-      recognizeStream = null;
-    }
-
     console.log(`Personal mode: ${data.sourceLanguage} -> ${data.targetLanguage}`);
 
     recognizeStream = speechService.createRecognizeStream(

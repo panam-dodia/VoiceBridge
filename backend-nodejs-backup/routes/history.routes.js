@@ -12,8 +12,6 @@ router.get('/sessions', async (req, res) => {
   try {
     const { userId, type, limit = 50, offset = 0 } = req.query;
 
-    console.log('📥 GET /api/history/sessions - userId:', userId, 'type:', type);
-
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
@@ -24,8 +22,6 @@ router.get('/sessions', async (req, res) => {
     } else {
       sessions = historyService.getUserSessions(userId, parseInt(limit), parseInt(offset));
     }
-
-    console.log(`✅ Found ${sessions.length} sessions for user ${userId}`);
 
     res.json({
       success: true,
@@ -48,12 +44,9 @@ router.get('/session/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    console.log('📥 GET /api/history/session/:sessionId - sessionId:', sessionId);
-
     const session = historyService.getSession(sessionId);
 
     if (!session) {
-      console.log(`❌ Session not found: ${sessionId}`);
       return res.status(404).json({ error: 'Session not found' });
     }
 
@@ -62,8 +55,6 @@ router.get('/session/:sessionId', async (req, res) => {
 
     // Get Q&A history
     const qa = historyService.getSessionQA(sessionId);
-
-    console.log(`✅ Session found: ${session.title}, ${transcripts.length} transcripts, ${qa.length} Q&As`);
 
     res.json({
       success: true,
@@ -195,13 +186,11 @@ router.get('/stats', async (req, res) => {
 
 /**
  * POST /api/history/qa
- * Ask question across all history or specific session
+ * Ask question across all history
  */
 router.post('/qa', async (req, res) => {
   try {
-    const { userId, question, sessionId, targetLanguage = 'English' } = req.body;
-
-    console.log('📥 POST /api/history/qa - Received:', { userId, question, sessionId, targetLanguage });
+    const { userId, question, targetLanguage = 'English' } = req.body;
 
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
@@ -211,36 +200,20 @@ router.post('/qa', async (req, res) => {
       return res.status(400).json({ error: 'Question is required' });
     }
 
-    let transcripts;
-    let contextType;
+    // Get all user transcripts
+    const allTranscripts = historyService.getAllUserTranscripts(userId);
 
-    // If sessionId is provided, use session-specific transcripts
-    if (sessionId) {
-      console.log(`🔍 Getting transcripts for session: ${sessionId}`);
-      transcripts = historyService.getSessionTranscripts(sessionId);
-      contextType = 'session';
-      console.log(`✅ Found ${transcripts.length} transcripts for session`);
-    } else {
-      // Otherwise, get all user transcripts
-      console.log(`🔍 Getting all transcripts for user: ${userId}`);
-      transcripts = historyService.getAllUserTranscripts(userId);
-      contextType = 'all_history';
-      console.log(`✅ Found ${transcripts.length} transcripts for user`);
-    }
+    // Answer with full history context
+    const answer = await geminiService.answerWithHistory(question, allTranscripts, targetLanguage);
 
-    // Answer with context
-    const answer = await geminiService.answerWithHistory(question, transcripts, targetLanguage);
-
-    // Save Q&A to history
-    historyService.saveQA(sessionId || null, userId, question, answer, contextType);
-    console.log(`✅ Saved Q&A for session: ${sessionId || 'null'}`);
+    // Save Q&A to history (no specific session)
+    historyService.saveQA(null, userId, question, answer, 'all_history');
 
     res.json({
       success: true,
       question,
       answer,
-      contextType,
-      sessionId: sessionId || null
+      contextType: 'all_history'
     });
   } catch (error) {
     console.error('Error answering question:', error);

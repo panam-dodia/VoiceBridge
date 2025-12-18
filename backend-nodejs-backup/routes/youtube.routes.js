@@ -157,12 +157,6 @@ router.post('/qa', async (req, res) => {
       return res.status(400).json({ error: 'User ID is required' });
     }
 
-    // Translate question to target language if not English
-    let translatedQuestion = question;
-    if (targetLanguage !== 'English') {
-      translatedQuestion = await geminiService.translateText(question, targetLanguage);
-    }
-
     let answer;
     let contextType = 'general';
 
@@ -172,27 +166,27 @@ router.post('/qa', async (req, res) => {
 
       if (transcripts.length > 0) {
         // Answer based on session context
-        answer = await geminiService.answerQuestion(translatedQuestion, transcripts, targetLanguage);
+        answer = await geminiService.answerQuestion(question, transcripts, targetLanguage);
         contextType = 'session';
       } else {
         // No transcripts, use all history
         const allTranscripts = historyService.getAllUserTranscripts(userId);
-        answer = await geminiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
+        answer = await geminiService.answerWithHistory(question, allTranscripts, targetLanguage);
         contextType = 'all_history';
       }
     } else {
       // No session, search all history
       const allTranscripts = historyService.getAllUserTranscripts(userId);
-      answer = await geminiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
+      answer = await geminiService.answerWithHistory(question, allTranscripts, targetLanguage);
       contextType = 'all_history';
     }
 
-    // Save Q&A to history (save the translated question)
-    historyService.saveQA(sessionId, userId, translatedQuestion, answer, contextType);
+    // Save Q&A to history
+    historyService.saveQA(sessionId, userId, question, answer, contextType);
 
     res.json({
       success: true,
-      question: translatedQuestion,
+      question,
       answer,
       contextType
     });

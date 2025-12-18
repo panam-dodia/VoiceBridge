@@ -3,6 +3,15 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { getWebSocketURL } from '@/lib/api';
+import { getUserId } from '@/lib/userStore';
+import axios from 'axios';
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
+  }
+}
 
 const LANGUAGES = [
   { code: 'en-US', name: 'English' },
@@ -31,6 +40,12 @@ interface Translation {
   timestamp: number;
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 export default function MeetingPage() {
   const [mode, setMode] = useState<'setup' | 'room'>('setup');
   const [joinMode, setJoinMode] = useState<'create' | 'join'>('create');
@@ -43,11 +58,22 @@ export default function MeetingPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [error, setError] = useState('');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Q&A states
+  const [question, setQuestion] = useState('');
+  const [askingQuestion, setAskingQuestion] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatMode, setChatMode] = useState<'text' | 'voice'>('text');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSpeakingAnswer, setIsSpeakingAnswer] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const translationsEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const qaAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Auto-scroll to latest translation
   useEffect(() => {
@@ -60,18 +86,23 @@ export default function MeetingPage() {
     ws.onopen = () => {
       console.log('WebSocket connected');
 
+      const persistentUserId = getUserId();
+      console.log('Using persistent userId:', persistentUserId);
+
       if (joinMode === 'create') {
         ws.send(JSON.stringify({
           type: 'create_room',
           name: name,
-          language: language
+          language: language,
+          userId: persistentUserId
         }));
       } else {
         ws.send(JSON.stringify({
           type: 'join_room',
           roomId: roomCode.toUpperCase(),
           name: name,
-          language: language
+          language: language,
+          userId: persistentUserId
         }));
       }
     };
@@ -81,12 +112,16 @@ export default function MeetingPage() {
 
       switch (data.type) {
         case 'room_created':
+          console.log('✅ Room created, sessionId:', data.sessionId);
           setMyRoomCode(data.roomId);
+          setSessionId(data.sessionId);
           setMode('room');
           break;
 
         case 'room_joined':
+          console.log('✅ Room joined, sessionId:', data.sessionId);
           setMyRoomCode(data.roomId);
+          setSessionId(data.sessionId);
           setMode('room');
           break;
 
@@ -152,7 +187,18 @@ export default function MeetingPage() {
         }
       };
 
-      mediaRecorder.start(250); // Send data every 250ms
+      // Handle when recording stops - send stop message AFTER all chunks are flushed
+      mediaRecorder.onstop = () => {
+        console.log('MediaRecorder stopped, sending stop_speaking message');
+        // Wait a bit for any final chunks to be sent
+        setTimeout(() => {
+          wsRef.current?.send(JSON.stringify({
+            type: 'stop_speaking'
+          }));
+        }, 200);
+      };
+
+      mediaRecorder.start(100); // Send data every 100ms for more responsive streaming
       mediaRecorderRef.current = mediaRecorder;
 
       // Tell server we're starting to speak
@@ -170,16 +216,13 @@ export default function MeetingPage() {
 
   const stopSpeaking = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      console.log('Stopping MediaRecorder...');
       mediaRecorderRef.current.stop();
     }
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
     }
-
-    wsRef.current?.send(JSON.stringify({
-      type: 'stop_speaking'
-    }));
 
     setIsSpeaking(false);
     setCurrentTranscript('');
@@ -212,6 +255,169 @@ export default function MeetingPage() {
   const copyRoomCode = () => {
     navigator.clipboard.writeText(myRoomCode);
     alert('Room code copied to clipboard!');
+  };
+
+  // Q&A Functions
+  const getLanguageName = (code: string) => {
+    const lang = LANGUAGES.find(l => l.code === code);
+    return lang ? lang.name : 'English';
+  };
+
+  const startVoiceRecording = () => {
+    console.log('🎤 Starting voice recording for Q&A...');
+
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Voice input is not supported in your browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    setIsRecording(true);
+
+    const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.lang = language; // Use meeting language
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = false;
+
+    console.log(`🌍 Voice recognition language set to: ${language}`);
+
+    recognitionRef.current.onstart = () => {
+      console.log('🎤 Speech recognition started');
+    };
+
+    recognitionRef.current.onresult = (event: any) => {
+      console.log('🎤 Speech recognized!', event);
+      const transcriptText = event.results[0][0].transcript;
+      console.log('📝 Recognized text:', transcriptText);
+      setQuestion(transcriptText);
+      setIsRecording(false);
+      sendQuestion(transcriptText);
+    };
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('❌ Speech recognition error:', event.error, event);
+      setIsRecording(false);
+      alert(`Voice recognition error: ${event.error}`);
+    };
+
+    recognitionRef.current.onend = () => {
+      console.log('🎤 Speech recognition ended');
+      setIsRecording(false);
+    };
+
+    try {
+      recognitionRef.current.start();
+      console.log('✅ Recognition started successfully');
+    } catch (err) {
+      console.error('❌ Failed to start recognition:', err);
+      setIsRecording(false);
+      alert(`Failed to start voice recognition: ${err}`);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  const sendQuestion = async (questionText?: string) => {
+    const finalQuestion = questionText || question;
+
+    console.log('📊 Q&A Debug - sessionId:', sessionId, 'question:', finalQuestion);
+
+    if (!finalQuestion.trim()) {
+      console.warn('⚠️ Question is empty');
+      return;
+    }
+
+    if (!sessionId) {
+      console.error('❌ No sessionId available! Cannot send question.');
+      alert('Session not initialized. Please try refreshing the page.');
+      return;
+    }
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: finalQuestion,
+      timestamp: new Date()
+    };
+    setChatHistory(prev => [...prev, userMessage]);
+    setQuestion('');
+    setAskingQuestion(true);
+
+    try {
+      console.log('📤 Sending Q&A request with:', {
+        userId: 'meeting-user',
+        question: finalQuestion,
+        sessionId: sessionId,
+        targetLanguage: getLanguageName(language)
+      });
+
+      const response = await axios.post('http://localhost:8080/api/history/qa', {
+        userId: 'meeting-user',
+        question: finalQuestion,
+        sessionId: sessionId,
+        targetLanguage: getLanguageName(language)
+      });
+
+      console.log('Received response:', response.data);
+
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: response.data.answer,
+        timestamp: new Date()
+      };
+      setChatHistory(prev => [...prev, assistantMessage]);
+
+      if (chatMode === 'voice') {
+        console.log('Speaking answer in voice mode');
+        await speakAnswer(response.data.answer);
+      }
+    } catch (err: any) {
+      console.error('Error asking question:', err);
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `Error: ${err.message || 'Failed to get answer'}`,
+        timestamp: new Date()
+      };
+      setChatHistory(prev => [...prev, errorMessage]);
+    } finally {
+      setAskingQuestion(false);
+    }
+  };
+
+  const speakAnswer = async (text: string) => {
+    try {
+      setIsSpeakingAnswer(true);
+
+      const response = await axios.post('http://localhost:8080/api/youtube/text-to-speech',
+        { text, gender: 'male' },
+        { responseType: 'arraybuffer' }
+      );
+
+      const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      if (!qaAudioRef.current) {
+        qaAudioRef.current = new Audio();
+      }
+
+      qaAudioRef.current.src = audioUrl;
+      qaAudioRef.current.onended = () => {
+        setIsSpeakingAnswer(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      await qaAudioRef.current.play();
+    } catch (err) {
+      console.error('Error speaking answer:', err);
+      setIsSpeakingAnswer(false);
+    }
+  };
+
+  const handleAskQuestion = async () => {
+    await sendQuestion();
   };
 
   // Cleanup on unmount
@@ -435,26 +641,136 @@ export default function MeetingPage() {
               )}
 
               <button
-                onMouseDown={startSpeaking}
-                onMouseUp={stopSpeaking}
-                onTouchStart={startSpeaking}
-                onTouchEnd={stopSpeaking}
+                onClick={isSpeaking ? stopSpeaking : startSpeaking}
                 className={`w-full px-6 py-8 rounded-xl font-bold text-lg transition-all ${
                   isSpeaking
-                    ? 'bg-purple-600 text-white scale-105'
+                    ? 'bg-red-600 text-white scale-105 animate-pulse'
                     : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
                 }`}
               >
-                {isSpeaking ? '🎤 Release to Stop' : '🎤 Hold to Speak'}
+                {isSpeaking ? '⏹️ Stop Speaking' : '🎤 Start Speaking'}
               </button>
 
               <p className="text-sm text-gray-400 text-center mt-3">
-                Press and hold to speak. Your speech will be translated for all participants.
+                Click to start speaking, click again to stop. Your speech will be translated for all participants.
               </p>
             </div>
+
+            {/* Q&A Section */}
+            {sessionId && (
+              <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-white">Q&A</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setChatMode('text')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                        chatMode === 'text'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      Text
+                    </button>
+                    <button
+                      onClick={() => setChatMode('voice')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                        chatMode === 'voice'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      Voice
+                    </button>
+                  </div>
+                </div>
+
+                {/* Chat History */}
+                <div className="h-[300px] overflow-y-auto mb-4 space-y-3 custom-scrollbar">
+                  {chatHistory.map((message, index) => (
+                    <div
+                      key={index}
+                      className={`p-4 rounded-lg ${
+                        message.role === 'user'
+                          ? 'bg-purple-600/30 ml-12'
+                          : 'bg-white/10 mr-12'
+                      }`}
+                    >
+                      <div className="text-xs text-white/60 mb-1">
+                        {message.role === 'user' ? 'You' : 'AI'} • {message.timestamp.toLocaleTimeString()}
+                      </div>
+                      <div className="text-white">{message.content}</div>
+                    </div>
+                  ))}
+                  {askingQuestion && (
+                    <div className="text-center text-gray-400 animate-pulse">
+                      Thinking...
+                    </div>
+                  )}
+                </div>
+
+                {/* Input Section */}
+                {chatMode === 'text' ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion()}
+                      placeholder="Ask anything about this conversation..."
+                      className="flex-1 px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
+                      disabled={askingQuestion}
+                    />
+                    <button
+                      onClick={handleAskQuestion}
+                      disabled={askingQuestion || !question.trim()}
+                      className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      {askingQuestion ? 'Asking...' : 'Send'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-4">
+                    <button
+                      onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+                      disabled={askingQuestion || isSpeakingAnswer}
+                      className={`w-24 h-24 rounded-full font-semibold transition-all disabled:opacity-50 ${
+                        isRecording
+                          ? 'bg-red-600 scale-110 animate-pulse'
+                          : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+                      }`}
+                    >
+                      {isRecording ? 'Stop' : 'Ask'}
+                    </button>
+                    {isSpeakingAnswer && (
+                      <div className="text-green-400 animate-pulse">Speaking answer...</div>
+                    )}
+                    {question && !askingQuestion && (
+                      <div className="text-white/60 text-sm">Recognized: {question}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(139, 92, 246, 0.3);
+          border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(139, 92, 246, 0.5);
+        }
+      `}</style>
     </main>
   );
 }

@@ -9,8 +9,6 @@ declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady: () => void;
-    webkitSpeechRecognition: any;
-    SpeechRecognition: any;
   }
 }
 
@@ -23,12 +21,6 @@ interface Transcript {
   text: string;
   start: number;
   duration: number;
-}
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
 }
 
 export default function YouTubePage() {
@@ -58,17 +50,15 @@ export default function YouTubePage() {
 
   // Q&A states
   const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
   const [askingQuestion, setAskingQuestion] = useState(false);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [chatMode, setChatMode] = useState<'text' | 'voice'>('text');
-  const [isRecording, setIsRecording] = useState(false);
-  const [isSpeakingAnswer, setIsSpeakingAnswer] = useState(false);
+
+  // Floating window state
+  const [showFloatingWindow, setShowFloatingWindow] = useState(false);
 
   const userId = getUserId();
   const playerRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const qaAudioRef = useRef<HTMLAudioElement | null>(null);
-  const recognitionRef = useRef<any>(null);
   const timeUpdateInterval = useRef<any>(null);
   const audioCache = useRef<Map<number, string>>(new Map());
   const translationCache = useRef<Map<number, string>>(new Map());
@@ -248,22 +238,9 @@ export default function YouTubePage() {
 
   const onPlayerStateChange = (event: any) => {
     if (event.data === 1) {
-      // Playing
       setIsVideoPlaying(true);
       setHasUserStarted(true);
-      // Resume audio queue processing if needed
-      if (autoPlayAudio && audioQueue.current.length > 0 && !isProcessingQueue.current) {
-        processAudioQueue();
-      }
-    } else if (event.data === 2) {
-      // Paused
-      setIsVideoPlaying(false);
-      if (audioRef.current && !audioRef.current.paused) {
-        audioRef.current.pause();
-        setIsPlayingAudio(false);
-      }
-    } else if (event.data === 0) {
-      // Ended
+    } else if (event.data === 2 || event.data === 0) {
       setIsVideoPlaying(false);
       if (audioRef.current) {
         audioRef.current.pause();
@@ -402,166 +379,22 @@ export default function YouTubePage() {
     });
   };
 
-  const openFloatingWindow = () => {
-    if (!videoId) return;
+  const handleAskQuestion = async () => {
+    if (!question.trim()) return;
 
-    const width = 600;
-    const height = 400;
-    const left = window.screen.width - width - 20;
-    const top = window.screen.height - height - 100;
-
-    window.open(
-      `/youtube/pip?videoId=${videoId}&lang=${targetLanguage}`,
-      'YouTube Player',
-      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
-    );
-  };
-
-  const startVoiceRecording = () => {
-    console.log('🎤 Starting voice recording...');
-
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Voice input is not supported in your browser. Please use Chrome or Edge.');
-      return;
-    }
-
-    if (playerRef.current?.pauseVideo) {
-      playerRef.current.pauseVideo();
-    }
-
-    setIsRecording(true);
-
-    // Map target language to speech recognition language code
-    const languageMap: { [key: string]: string } = {
-      'English': 'en-US',
-      'Spanish': 'es-ES',
-      'French': 'fr-FR',
-      'German': 'de-DE',
-      'Italian': 'it-IT',
-      'Portuguese': 'pt-PT',
-      'Russian': 'ru-RU',
-      'Japanese': 'ja-JP',
-      'Korean': 'ko-KR',
-      'Chinese': 'zh-CN',
-      'Hindi': 'hi-IN'
-    };
-
-    const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
-    recognitionRef.current = new SpeechRecognition();
-    recognitionRef.current.lang = languageMap[targetLanguage] || 'en-US';
-    recognitionRef.current.continuous = false;
-    recognitionRef.current.interimResults = false;
-
-    console.log(`🌍 Voice recognition language set to: ${recognitionRef.current.lang} (${targetLanguage})`);
-
-    recognitionRef.current.onstart = () => {
-      console.log('🎤 Speech recognition started');
-    };
-
-    recognitionRef.current.onresult = (event: any) => {
-      console.log('🎤 Speech recognized!', event);
-      const transcriptText = event.results[0][0].transcript;
-      console.log('📝 Recognized text:', transcriptText);
-      setQuestion(transcriptText);
-      setIsRecording(false);
-      sendQuestion(transcriptText);
-    };
-
-    recognitionRef.current.onerror = (event: any) => {
-      console.error('❌ Speech recognition error:', event.error, event);
-      setIsRecording(false);
-      alert(`Voice recognition error: ${event.error}`);
-    };
-
-    recognitionRef.current.onend = () => {
-      console.log('🎤 Speech recognition ended');
-      setIsRecording(false);
-    };
-
-    try {
-      recognitionRef.current.start();
-      console.log('✅ Recognition started successfully');
-    } catch (err) {
-      console.error('❌ Failed to start recognition:', err);
-      setIsRecording(false);
-      alert(`Failed to start voice recognition: ${err}`);
-    }
-  };
-
-  const stopVoiceRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    setIsRecording(false);
-  };
-
-  const sendQuestion = async (questionText?: string) => {
-    const finalQuestion = questionText || question;
-    if (!finalQuestion.trim()) return;
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: finalQuestion,
-      timestamp: new Date()
-    };
-    setChatHistory(prev => [...prev, userMessage]);
-    setQuestion('');
     setAskingQuestion(true);
+    setAnswer('');
 
     try {
-      console.log('Sending question:', finalQuestion, 'Language:', targetLanguage);
-      const response = await youtubeAPI.askQuestion(finalQuestion, userId, sessionId || undefined, targetLanguage);
-      console.log('Received response:', response);
-
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: response.answer,
-        timestamp: new Date()
-      };
-      setChatHistory(prev => [...prev, assistantMessage]);
-
-      if (chatMode === 'voice') {
-        console.log('Speaking answer in voice mode');
-        await speakAnswer(response.answer);
-      }
+      const response = await youtubeAPI.askQuestion(question, userId, sessionId || undefined, targetLanguage);
+      setAnswer(response.answer);
+      setQuestion('');
     } catch (err: any) {
-      console.error('Error asking question:', err);
-      const errorMessage: ChatMessage = {
-        role: 'assistant',
-        content: `Error: ${err.message || 'Failed to get answer'}`,
-        timestamp: new Date()
-      };
-      setChatHistory(prev => [...prev, errorMessage]);
+      setAnswer('Failed to get answer. Please try again.');
+      console.error('Q&A error:', err);
     } finally {
       setAskingQuestion(false);
     }
-  };
-
-  const speakAnswer = async (text: string) => {
-    try {
-      setIsSpeakingAnswer(true);
-      const audioData = await youtubeAPI.textToSpeech(text, voiceGender);
-      const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      if (!qaAudioRef.current) {
-        qaAudioRef.current = new Audio();
-      }
-
-      qaAudioRef.current.src = audioUrl;
-      qaAudioRef.current.onended = () => {
-        setIsSpeakingAnswer(false);
-        URL.revokeObjectURL(audioUrl);
-      };
-      await qaAudioRef.current.play();
-    } catch (err) {
-      console.error('Error speaking answer:', err);
-      setIsSpeakingAnswer(false);
-    }
-  };
-
-  const handleAskQuestion = async () => {
-    await sendQuestion();
   };
 
   return (
@@ -668,15 +501,15 @@ export default function YouTubePage() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-white">Video</h2>
                 <button
-                  onClick={openFloatingWindow}
+                  onClick={() => setShowFloatingWindow(!showFloatingWindow)}
                   className="px-3 py-1 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 transition-all"
                 >
-                  Open Floating
+                  {showFloatingWindow ? 'Dock' : 'Float'}
                 </button>
               </div>
               <div
                 id="youtube-player"
-                className="aspect-video w-full"
+                className={showFloatingWindow ? 'hidden' : 'aspect-video w-full'}
               ></div>
 
               {/* Auto-play toggle */}
@@ -728,67 +561,33 @@ export default function YouTubePage() {
           </div>
         )}
 
+        {/* Floating Video Window */}
+        {showFloatingWindow && videoId && (
+          <div className="fixed bottom-6 right-6 w-96 bg-black rounded-2xl shadow-2xl border border-white/10 z-50">
+            <div className="p-3 border-b border-white/10 flex items-center justify-between">
+              <span className="text-white text-sm font-medium">YouTube Player</span>
+              <button
+                onClick={() => setShowFloatingWindow(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div id="youtube-player-floating" className="aspect-video w-full"></div>
+          </div>
+        )}
+
         {/* Q&A Section */}
         {sessionId && (
           <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white">Q&A</h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setChatMode('text')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    chatMode === 'text'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-white/10 text-white/60 hover:bg-white/20'
-                  }`}
-                >
-                  Text
-                </button>
-                <button
-                  onClick={() => setChatMode('voice')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    chatMode === 'voice'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-white/10 text-white/60 hover:bg-white/20'
-                  }`}
-                >
-                  Voice
-                </button>
-              </div>
-            </div>
-
-            {/* Chat History */}
-            <div className="h-[300px] overflow-y-auto mb-4 space-y-3 custom-scrollbar">
-              {chatHistory.map((message, index) => (
-                <div
-                  key={index}
-                  className={`p-4 rounded-lg ${
-                    message.role === 'user'
-                      ? 'bg-purple-600/30 ml-12'
-                      : 'bg-white/10 mr-12'
-                  }`}
-                >
-                  <div className="text-xs text-white/60 mb-1">
-                    {message.role === 'user' ? 'You' : 'AI'} • {message.timestamp.toLocaleTimeString()}
-                  </div>
-                  <div className="text-white">{message.content}</div>
-                </div>
-              ))}
-              {askingQuestion && (
-                <div className="text-center text-gray-400 animate-pulse">
-                  Thinking...
-                </div>
-              )}
-            </div>
-
-            {/* Input Section */}
-            {chatMode === 'text' ? (
+            <h2 className="text-xl font-bold text-white mb-4">Ask a Question</h2>
+            <div className="space-y-4">
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion()}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
                   placeholder="Ask anything about this video..."
                   className="flex-1 px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
                   disabled={askingQuestion}
@@ -798,30 +597,17 @@ export default function YouTubePage() {
                   disabled={askingQuestion || !question.trim()}
                   className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  {askingQuestion ? 'Asking...' : 'Send'}
+                  {askingQuestion ? 'Asking...' : 'Ask'}
                 </button>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4">
-                <button
-                  onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
-                  disabled={askingQuestion || isSpeakingAnswer}
-                  className={`w-24 h-24 rounded-full font-semibold transition-all disabled:opacity-50 ${
-                    isRecording
-                      ? 'bg-red-600 scale-110 animate-pulse'
-                      : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
-                  }`}
-                >
-                  {isRecording ? 'Stop' : 'Start Recording'}
-                </button>
-                {isSpeakingAnswer && (
-                  <div className="text-green-400 animate-pulse">Speaking answer...</div>
-                )}
-                {question && !askingQuestion && (
-                  <div className="text-white/60 text-sm">Recognized: {question}</div>
-                )}
-              </div>
-            )}
+
+              {answer && (
+                <div className="p-4 bg-purple-600/10 border border-purple-500/20 rounded-xl">
+                  <p className="text-sm text-purple-300 font-medium mb-1">Answer:</p>
+                  <p className="text-white">{answer}</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

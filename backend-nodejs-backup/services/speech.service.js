@@ -40,8 +40,8 @@ class SpeechService {
 
     return {
       config: {
-        encoding: 'WEBM_OPUS',
-        sampleRateHertz: 48000,
+        encoding: 'LINEAR16',
+        sampleRateHertz: 16000,
         languageCode: languageCode,
         enableAutomaticPunctuation: true,
         model: 'latest_long',
