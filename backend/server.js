@@ -6,7 +6,7 @@ import cors from 'cors';
 import youtubeRoutes from './routes/youtube.routes.js';
 import historyRoutes from './routes/history.routes.js';
 import speechService from './services/speech.service.js';
-import geminiService from './services/gemini.service.js';
+import aiService from './services/ai.service.js';
 import ttsService from './services/tts.service.js';
 import historyService from './services/history.service.js';
 import db from './database/db.js';
@@ -14,8 +14,33 @@ import db from './database/db.js';
 const app = express();
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  process.env.FRONTEND_URL,
+  /https:\/\/.*\.vercel\.app$/  // Allow all Vercel preview and production URLs
+].filter(Boolean);
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+
+    // Check if origin is in allowed list or matches regex pattern
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return allowed === origin;
+    });
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('⚠️ CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -104,14 +129,6 @@ wss.on('connection', (ws) => {
               break;
 
             case 'agent_query_stop':
-              handleStopSpeaking();
-              break;
-
-            case 'personal_mode_start':
-              await handlePersonalModeStart(ws, data);
-              break;
-
-            case 'personal_mode_stop':
               handleStopSpeaking();
               break;
 
@@ -324,73 +341,6 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'ready' }));
   }
 
-  async function handlePersonalModeStart(ws, data) {
-    // Close existing stream if any
-    if (recognizeStream) {
-      console.log(`⚠️ Closing existing recognition stream before starting personal mode`);
-      try {
-        recognizeStream.end();
-      } catch (err) {
-        console.error('Error closing old stream:', err);
-      }
-      recognizeStream = null;
-    }
-
-    console.log(`Personal mode: ${data.sourceLanguage} -> ${data.targetLanguage}`);
-
-    recognizeStream = speechService.createRecognizeStream(
-      getLanguageName(data.sourceLanguage),
-      async (result) => {
-        const { text, isFinal } = result;
-
-        ws.send(JSON.stringify({
-          type: 'personal_transcript',
-          text: text
-        }));
-
-        if (isFinal) {
-          try {
-            const sourceLang = data.sourceLanguage.split('-')[0];
-            const targetLang = data.targetLanguage.split('-')[0];
-
-            if (sourceLang !== targetLang) {
-              const translatedText = await geminiService.translateText(
-                text,
-                getLanguageName(data.targetLanguage)
-              );
-
-              ws.send(JSON.stringify({
-                type: 'personal_translation',
-                translated: translatedText
-              }));
-
-              // Generate audio
-              try {
-                const audioBuffer = await ttsService.textToSpeech(translatedText);
-
-                ws.send(JSON.stringify({
-                  type: 'personal_audio',
-                  audio: audioBuffer.toString('base64')
-                }));
-
-                console.log('✓ Personal mode audio sent');
-              } catch (error) {
-                console.error('Personal mode audio error:', error);
-              }
-            }
-          } catch (error) {
-            console.error('Personal mode translation error:', error);
-          }
-        }
-      },
-      (error) => {
-        console.error('Personal mode recognition error:', error);
-      }
-    );
-
-    ws.send(JSON.stringify({ type: 'ready' }));
-  }
-
   function handleDisconnect() {
     if (recognizeStream) {
       recognizeStream.end();
@@ -473,7 +423,7 @@ async function translateAndBroadcast(roomId, speakerId, text, sourceLanguage, sp
 
       // Only translate if languages are different
       if (sourceLang !== targetLang) {
-        translatedText = await geminiService.translateText(text, targetLang);
+        translatedText = await aiService.translateText(text, targetLang);
       }
 
       // Save translated version
@@ -542,7 +492,7 @@ Instructions:
 
 Answer:`;
 
-    const result = await geminiService.model.generateContent(prompt);
+    const result = await aiService.model.generateContent(prompt);
     const response = await result.response;
     const answer = response.text().trim();
 

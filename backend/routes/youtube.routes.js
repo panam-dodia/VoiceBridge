@@ -1,6 +1,6 @@
 import express from 'express';
 import youtubeService from '../services/youtube.service.js';
-import geminiService from '../services/gemini.service.js';
+import aiService from '../services/ai.service.js';
 import ttsService from '../services/tts.service.js';
 import historyService from '../services/history.service.js';
 
@@ -25,15 +25,20 @@ router.post('/transcript', async (req, res) => {
     // Extract video ID
     const videoId = youtubeService.extractVideoId(url);
 
+    // Get video metadata (title, author, etc.)
+    const metadata = await youtubeService.getVideoMetadata(videoId);
+    console.log(`📺 Video metadata:`, metadata);
+
     // Get transcript
     const transcript = await youtubeService.getTranscript(videoId);
 
-    // Create session in database
+    // Create session in database with actual video title
+    const title = metadata.title || `YouTube Video: ${videoId}`;
     const sessionId = historyService.createSession(
       userId,
       'youtube',
-      { videoId, url },
-      `YouTube Video: ${videoId}`,
+      { videoId, url, title: metadata.title, author: metadata.author },
+      title,
       'English'
     );
 
@@ -78,7 +83,7 @@ router.post('/translate-text', async (req, res) => {
     }
 
     // Translate using Gemini
-    const translatedText = await geminiService.translateText(text, targetLanguage);
+    const translatedText = await aiService.translateText(text, targetLanguage);
 
     // Update transcript in database if sessionId provided
     if (sessionId) {
@@ -160,7 +165,7 @@ router.post('/qa', async (req, res) => {
     // Translate question to target language if not English
     let translatedQuestion = question;
     if (targetLanguage !== 'English') {
-      translatedQuestion = await geminiService.translateText(question, targetLanguage);
+      translatedQuestion = await aiService.translateText(question, targetLanguage);
     }
 
     let answer;
@@ -172,18 +177,18 @@ router.post('/qa', async (req, res) => {
 
       if (transcripts.length > 0) {
         // Answer based on session context
-        answer = await geminiService.answerQuestion(translatedQuestion, transcripts, targetLanguage);
+        answer = await aiService.answerQuestion(translatedQuestion, transcripts, targetLanguage);
         contextType = 'session';
       } else {
         // No transcripts, use all history
         const allTranscripts = historyService.getAllUserTranscripts(userId);
-        answer = await geminiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
+        answer = await aiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
         contextType = 'all_history';
       }
     } else {
       // No session, search all history
       const allTranscripts = historyService.getAllUserTranscripts(userId);
-      answer = await geminiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
+      answer = await aiService.answerWithHistory(translatedQuestion, allTranscripts, targetLanguage);
       contextType = 'all_history';
     }
 
@@ -217,7 +222,7 @@ router.post('/detect-gender', async (req, res) => {
       return res.status(400).json({ error: 'Transcript sample is required' });
     }
 
-    const gender = await geminiService.detectVoiceGender(transcriptSample);
+    const gender = await aiService.detectVoiceGender(transcriptSample);
 
     res.json({
       success: true,

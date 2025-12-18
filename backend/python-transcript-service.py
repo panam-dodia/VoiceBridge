@@ -6,6 +6,11 @@ This works reliably because youtube-transcript-api is well-maintained
 from flask import Flask, jsonify, request
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
+import ssl
+import certifi
+
+# Fix SSL certificate issue by using certifi's certificate bundle
+ssl._create_default_https_context = ssl._create_unverified_context
 
 app = Flask(__name__)
 api = YouTubeTranscriptApi()

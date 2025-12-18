@@ -1,6 +1,6 @@
 import express from 'express';
 import historyService from '../services/history.service.js';
-import geminiService from '../services/gemini.service.js';
+import aiService from '../services/ai.service.js';
 
 const router = express.Router();
 
@@ -229,7 +229,7 @@ router.post('/qa', async (req, res) => {
     }
 
     // Answer with context
-    const answer = await geminiService.answerWithHistory(question, transcripts, targetLanguage);
+    const answer = await aiService.answerWithHistory(question, transcripts, targetLanguage);
 
     // Save Q&A to history
     historyService.saveQA(sessionId || null, userId, question, answer, contextType);

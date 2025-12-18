@@ -1,17 +1,35 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { VertexAI } from '@google-cloud/vertexai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-class GeminiService {
+class VertexAIService {
   constructor() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY not found in environment variables');
+    // Initialize Vertex AI with your Google Cloud project
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
+    const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+
+    if (!projectId || projectId === 'your-project-id') {
+      console.warn('⚠️ GOOGLE_CLOUD_PROJECT_ID not configured. Falling back to direct Gemini API.');
+      this.useDirectAPI = true;
+      return;
     }
 
-    this.genAI = new GoogleGenerativeAI(apiKey);
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    console.log(`🔧 Initializing Vertex AI: Project=${projectId}, Location=${location}`);
+
+    this.vertexAI = new VertexAI({
+      project: projectId,
+      location: location,
+    });
+
+    // Initialize Gemini model via Vertex AI
+    // Using gemini-2.5-flash for best balance of quality and speed
+    this.model = this.vertexAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+    });
+
+    this.useDirectAPI = false;
+    console.log('✅ Vertex AI initialized successfully');
   }
 
   /**
@@ -41,10 +59,10 @@ Instructions:
 Answer:`;
 
       const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      return response.text().trim();
+      const response = result.response;
+      return response.candidates[0].content.parts[0].text.trim();
     } catch (error) {
-      console.error('Gemini API error:', error.message);
+      console.error('Vertex AI error:', error.message);
       throw new Error(`Failed to generate answer: ${error.message}`);
     }
   }
@@ -55,9 +73,6 @@ Answer:`;
   async answerWithHistory(question, allTranscripts, targetLanguage = 'English') {
     try {
       // Organize transcripts by session
-      const contextSections = [];
-
-      // Group by session
       const sessionMap = new Map();
       for (const t of allTranscripts) {
         if (!sessionMap.has(t.session_id)) {
@@ -105,16 +120,16 @@ Instructions:
 Answer:`;
 
       const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      return response.text().trim();
+      const response = result.response;
+      return response.candidates[0].content.parts[0].text.trim();
     } catch (error) {
-      console.error('Gemini API error:', error.message);
+      console.error('Vertex AI error:', error.message);
       throw new Error(`Failed to generate answer: ${error.message}`);
     }
   }
 
   /**
-   * Translate text to target language using Gemini
+   * Translate text to target language using Gemini via Vertex AI
    */
   async translateText(text, targetLanguage) {
     try {
@@ -123,8 +138,8 @@ Answer:`;
 ${text}`;
 
       const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      return response.text().trim();
+      const response = result.response;
+      return response.candidates[0].content.parts[0].text.trim();
     } catch (error) {
       console.error('Translation error:', error.message);
       throw new Error(`Failed to translate: ${error.message}`);
@@ -151,8 +166,8 @@ Respond with ONLY ONE WORD: either "male" or "female"
 Answer:`;
 
       const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const gender = response.text().trim().toLowerCase();
+      const response = result.response;
+      const gender = response.candidates[0].content.parts[0].text.trim().toLowerCase();
 
       if (gender.includes('female')) {
         return 'female';
@@ -168,4 +183,4 @@ Answer:`;
   }
 }
 
-export default new GeminiService();
+export default new VertexAIService();

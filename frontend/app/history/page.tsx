@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { getUserId } from '@/lib/userStore';
 import { historyAPI } from '@/lib/api';
@@ -34,11 +34,52 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
 
+  // Q&A across all history
+  const [qaQuestion, setQaQuestion] = useState('');
+  const [qaAnswer, setQaAnswer] = useState<string | null>(null);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const userId = getUserId();
 
   useEffect(() => {
     loadSessions();
   }, [filter]);
+
+  useEffect(() => {
+    // Initialize speech recognition
+    if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-US';
+
+      recognitionRef.current.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        console.log('📝 Recognized text:', transcript);
+        setQaQuestion(transcript);
+      };
+
+      recognitionRef.current.onend = () => {
+        console.log('🎤 Speech recognition ended');
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   const loadSessions = async () => {
     setLoading(true);
@@ -79,6 +120,88 @@ export default function HistoryPage() {
       setSessionDetails(response);
     } catch (err) {
       console.error('Error loading session details:', err);
+    }
+  };
+
+  // Ask Q&A across all history
+  const handleAskQuestion = async () => {
+    if (!qaQuestion.trim()) {
+      console.log('⚠️ Question is empty, not sending request');
+      return;
+    }
+
+    console.log('🎯 Starting Q&A request...');
+    console.log('📝 Question:', qaQuestion);
+    console.log('👤 User ID:', userId);
+
+    setQaLoading(true);
+    setQaAnswer(null);
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      console.log('🌐 API URL:', API_URL);
+      console.log('📤 Sending POST request to:', `${API_URL}/api/history/qa`);
+
+      const requestBody = {
+        userId,
+        question: qaQuestion,
+        targetLanguage: 'English'
+      };
+      console.log('📦 Request body:', JSON.stringify(requestBody, null, 2));
+
+      const response = await fetch(`${API_URL}/api/history/qa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
+
+      const data = await response.json();
+      console.log('📥 Received data:', data);
+
+      if (data.success) {
+        console.log('✅ Success! Answer:', data.answer);
+        setQaAnswer(data.answer);
+
+        // Play audio response
+        if (data.audioUrl) {
+          const audio = new Audio(`${API_URL}${data.audioUrl}`);
+          audioRef.current = audio;
+          audio.play();
+        }
+      } else {
+        console.error('❌ API returned error:', data.error);
+        throw new Error(data.error || 'Failed to get answer');
+      }
+    } catch (err: any) {
+      console.error('❌ Q&A error:', err);
+      console.error('❌ Error name:', err.name);
+      console.error('❌ Error message:', err.message);
+      console.error('❌ Error stack:', err.stack);
+      setQaAnswer('Sorry, I couldn\'t answer your question. Please try again. Error: ' + err.message);
+    } finally {
+      console.log('🏁 Request complete, setting loading to false');
+      setQaLoading(false);
+    }
+  };
+
+  const startVoiceRecording = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition not supported in this browser');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setQaQuestion('');
+      setQaAnswer(null);
+      recognitionRef.current.start();
+      setIsListening(true);
+      console.log('🎤 Voice recording started');
     }
   };
 
@@ -140,7 +263,79 @@ export default function HistoryPage() {
         {/* Page Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">History</h1>
-          <p className="text-gray-400">View all your translation sessions</p>
+          <p className="text-gray-400">View all your translation sessions and ask questions</p>
+        </div>
+
+        {/* AI Q&A Section */}
+        <div className="mb-8 bg-gradient-to-br from-purple-600/10 to-blue-600/10 backdrop-blur-sm rounded-2xl border border-purple-500/20 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h2 className="text-xl font-bold text-white">Ask About Your History</h2>
+          </div>
+          <p className="text-gray-300 mb-4 text-sm">
+            Ask questions about your past YouTube videos and meetings. For example: "What did I discuss in the last meeting?" or "Summarize the YouTube video about AI"
+          </p>
+
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={qaQuestion}
+                onChange={(e) => setQaQuestion(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && !qaLoading && handleAskQuestion()}
+                placeholder="Type your question or use voice..."
+                className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
+                disabled={qaLoading || isListening}
+              />
+              <button
+                onClick={startVoiceRecording}
+                disabled={qaLoading}
+                className={`px-6 py-3 rounded-xl font-medium transition-all ${
+                  isListening
+                    ? 'bg-red-600 text-white hover:bg-red-700 animate-pulse'
+                    : 'bg-white/10 text-white hover:bg-white/20'
+                }`}
+              >
+                {isListening ? '🔴 Listening...' : '🎤'}
+              </button>
+              <button
+                onClick={handleAskQuestion}
+                disabled={qaLoading || !qaQuestion.trim()}
+                className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 transition-all"
+              >
+                {qaLoading ? 'Thinking...' : 'Ask'}
+              </button>
+            </div>
+
+            {qaLoading && (
+              <div className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                  <div className="flex-1">
+                    <p className="text-gray-300">Searching through your history and generating answer...</p>
+                    <div className="mt-2 w-full bg-white/5 rounded-full h-2 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-purple-600 to-blue-600 animate-pulse" style={{width: '100%'}}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!qaLoading && qaAnswer && (
+              <div className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
+                <div className="flex items-start gap-2">
+                  <svg className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-white">{qaAnswer}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Search Bar */}
