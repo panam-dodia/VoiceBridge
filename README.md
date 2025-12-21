@@ -353,6 +353,23 @@ const answer = await vertexAI.generate(context);       // Generation
 
 ---
 
+## 🚧 Future Enhancements
+
+### Video Conferencing Integration
+- **WebRTC video support** for face-to-face meetings with translation
+- **Screen sharing** with live translation overlay
+- **Picture-in-picture mode** for multitasking
+- **Chrome extension** for Google Meet/Zoom integration
+
+### Advanced Features
+- **Offline mode** with local model support
+- **Custom voice cloning** for personalized TTS
+- **Multi-speaker detection** and diarization
+- **Real-time subtitles** overlay
+- **Mobile apps** (iOS/Android)
+
+---
+
 ## 📁 Project Structure
 
 ```

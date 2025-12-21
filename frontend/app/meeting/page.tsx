@@ -68,12 +68,19 @@ export default function MeetingPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeakingAnswer, setIsSpeakingAnswer] = useState(false);
 
+  // Video states
+  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [myUserId, setMyUserId] = useState<string>('');
+
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const translationsEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const qaAudioRef = useRef<HTMLAudioElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Auto-scroll to latest translation
   useEffect(() => {

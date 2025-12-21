@@ -132,6 +132,13 @@ wss.on('connection', (ws) => {
               handleStopSpeaking();
               break;
 
+            // WebRTC signaling
+            case 'webrtc_offer':
+            case 'webrtc_answer':
+            case 'webrtc_ice_candidate':
+              handleWebRTCSignaling(data);
+              break;
+
             default:
               console.log('Unknown message type:', data.type);
           }
@@ -339,6 +346,37 @@ wss.on('connection', (ws) => {
 
     participant.recognizeStream = recognizeStream;
     ws.send(JSON.stringify({ type: 'ready' }));
+  }
+
+  function handleWebRTCSignaling(data) {
+    if (!currentRoom || !userId) return;
+
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    console.log(`📡 WebRTC signaling: ${data.type} from ${userId} to ${data.targetUserId || 'all'}`);
+
+    // Forward WebRTC signaling to target participant(s)
+    if (data.targetUserId) {
+      // Send to specific participant
+      const targetParticipant = room.participants.get(data.targetUserId);
+      if (targetParticipant) {
+        targetParticipant.ws.send(JSON.stringify({
+          ...data,
+          fromUserId: userId
+        }));
+      }
+    } else {
+      // Broadcast to all other participants (for offers)
+      room.participants.forEach((participant, participantId) => {
+        if (participantId !== userId) {
+          participant.ws.send(JSON.stringify({
+            ...data,
+            fromUserId: userId
+          }));
+        }
+      });
+    }
   }
 
   function handleDisconnect() {
