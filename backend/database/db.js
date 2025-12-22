@@ -148,11 +148,11 @@ export const statements = {
   getAllUserTranscripts: {
     all: (userId) =>
       allStatement(
-        `SELECT t.*, s.type, s.title
+        `SELECT t.*, s.type, s.title, s.created_at, s.ended_at, s.language
          FROM transcripts t
          JOIN sessions s ON t.session_id = s.id
          WHERE s.user_id = ?
-         ORDER BY t.timestamp DESC`,
+         ORDER BY s.created_at DESC, t.timestamp DESC`,
         [userId]
       )
   },

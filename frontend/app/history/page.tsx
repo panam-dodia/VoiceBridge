@@ -27,12 +27,9 @@ interface Transcript {
 export default function HistoryPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [filter, setFilter] = useState<'all' | 'youtube' | 'meeting'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [sessionDetails, setSessionDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
 
   // Q&A across all history
   const [qaQuestion, setQaQuestion] = useState('');
@@ -93,23 +90,6 @@ export default function HistoryPage() {
       console.error('Error loading sessions:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    setSearching(true);
-    try {
-      const response = await historyAPI.search(userId, searchQuery);
-      setSearchResults(response.results || []);
-    } catch (err) {
-      console.error('Search error:', err);
-    } finally {
-      setSearching(false);
     }
   };
 
@@ -336,50 +316,6 @@ export default function HistoryPage() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Search across all transcripts..."
-              className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
-            <button
-              onClick={handleSearch}
-              disabled={searching}
-              className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 transition-all"
-            >
-              {searching ? 'Searching...' : 'Search'}
-            </button>
-          </div>
-
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <div className="mt-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 max-h-64 overflow-y-auto">
-              <p className="text-sm text-gray-400 mb-3">Found {searchResults.length} results</p>
-              {searchResults.map((result, idx) => (
-                <div key={idx} className="mb-3 p-3 bg-black/20 rounded-lg border border-white/5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      result.type === 'youtube' ? 'bg-purple-600/20 text-purple-300' : 'bg-blue-600/20 text-blue-300'
-                    }`}>
-                      {result.type}
-                    </span>
-                    <span className="text-sm text-gray-400">{result.title}</span>
-                  </div>
-                  <p className="text-white text-sm">{result.original_text}</p>
-                  {result.translated_text && (
-                    <p className="text-gray-400 text-sm mt-1">→ {result.translated_text}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Filter Tabs */}

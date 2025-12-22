@@ -92,11 +92,16 @@ Answer:`;
       const sortedSessions = Array.from(sessionMap.entries())
         .sort((a, b) => new Date(b[1].created_at) - new Date(a[1].created_at));
 
-      // Build session metadata summary
-      let sessionListText = '\n\nAvailable Sessions:\n';
+      // Build session metadata summary with ALL sessions
+      let sessionListText = '\n\nComplete Session List (Most Recent First):\n';
       sortedSessions.forEach(([sessionId, data], index) => {
         const sessionType = data.type === 'youtube' ? 'YouTube Video' : 'Meeting';
         const sessionTitle = data.title || 'Untitled';
+
+        // Extract room code from title if it's a meeting (e.g., "Meeting: 2EDUVT")
+        const roomCodeMatch = sessionTitle.match(/Meeting:\s*([A-Z0-9]+)/i);
+        const roomCode = roomCodeMatch ? roomCodeMatch[1] : null;
+
         const createdDate = new Date(data.created_at).toLocaleString('en-US', {
           year: 'numeric',
           month: 'long',
@@ -104,7 +109,9 @@ Answer:`;
           hour: '2-digit',
           minute: '2-digit'
         });
-        sessionListText += `${index + 1}. [${sessionType}] "${sessionTitle}" - ${createdDate}\n`;
+
+        const roomInfo = roomCode ? ` (Room Code: ${roomCode})` : '';
+        sessionListText += `${index + 1}. [${sessionType}] "${sessionTitle}"${roomInfo} - ${createdDate}\n`;
       });
 
       // Build context from recent sessions (limit to prevent token overflow)
@@ -144,13 +151,14 @@ ${contextText}
 User's Question: ${question}
 
 Instructions:
-1. For questions about "when was my last meeting/video", refer to the session list above and provide the date and title
-2. For questions about specific session names or topics, search the session list and content
-3. For questions about content, answer from the transcripts and cite which session it came from
-4. For general knowledge questions, provide a helpful answer but mention it's not from the history
-5. Answer in ${targetLanguage} language
-6. Keep your answer concise and clear (2-5 sentences)
-7. When mentioning dates, use the exact dates from the session list
+1. **CRITICAL**: For "when was my last meeting/video" questions, THE ANSWER IS ALWAYS #1 IN THE LIST ABOVE (the first item). It's already sorted by most recent first. State the date and title from item #1.
+2. For questions searching by room code (like "2EDUVT", "O4U558"), search the session list above for that exact code in the "(Room Code: XXX)" field
+3. For questions about specific session names or topics, search both the session list and content
+4. For questions about content, answer from the transcripts and cite which session it came from
+5. For general knowledge questions, provide a helpful answer but mention it's not from the history
+6. Answer in ${targetLanguage} language
+7. Keep your answer concise and clear (2-5 sentences)
+8. When mentioning dates, use the EXACT dates from the session list above
 
 Answer:`;
 
