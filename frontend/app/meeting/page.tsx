@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { getWebSocketURL } from '@/lib/api';
 import { getUserId } from '@/lib/userStore';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import axios from 'axios';
 
 declare global {
@@ -46,6 +47,31 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+// Remote Video Component
+function RemoteVideo({ stream, name }: { stream: MediaStream; name: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-white/10">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="w-full h-full object-cover"
+      />
+      <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
+        {name}
+      </div>
+    </div>
+  );
+}
+
 export default function MeetingPage() {
   const [mode, setMode] = useState<'setup' | 'room'>('setup');
   const [joinMode, setJoinMode] = useState<'create' | 'join'>('create');
@@ -81,6 +107,44 @@ export default function MeetingPage() {
   const recognitionRef = useRef<any>(null);
   const qaAudioRef = useRef<HTMLAudioElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // WebRTC handlers
+  const handleRemoteStream = useCallback((userId: string, stream: MediaStream) => {
+    console.log(`📹 Adding remote stream for user: ${userId}`);
+    setRemoteStreams(prev => {
+      const newMap = new Map(prev);
+      newMap.set(userId, stream);
+      return newMap;
+    });
+  }, []);
+
+  const handleRemoteStreamRemoved = useCallback((userId: string) => {
+    console.log(`🗑️ Removing remote stream for user: ${userId}`);
+    setRemoteStreams(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(userId);
+      return newMap;
+    });
+  }, []);
+
+  const sendWebRTCSignal = useCallback((signal: any) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(signal));
+    }
+  }, []);
+
+  const {
+    createOffer,
+    handleOffer,
+    handleAnswer,
+    handleIceCandidate,
+    removePeerConnection
+  } = useWebRTC({
+    localStream: localVideoStream,
+    onRemoteStream: handleRemoteStream,
+    onRemoteStreamRemoved: handleRemoteStreamRemoved,
+    sendSignal: sendWebRTCSignal
+  });
 
   // Auto-scroll to latest translation
   useEffect(() => {
@@ -134,6 +198,34 @@ export default function MeetingPage() {
 
         case 'participants_update':
           setParticipants(data.participants);
+          // When new participants join and we have video enabled, offer our stream
+          // Only create offer if we joined first (to avoid both sides offering)
+          if (videoEnabled && localVideoStream) {
+            const myId = getUserId();
+            data.participants.forEach((p: Participant) => {
+              if (p.userId !== myId && p.userId > myId) {
+                // Only offer to users with higher userId to avoid duplicate connections
+                console.log(`📤 Sending video offer to new participant: ${p.userId}`);
+                setTimeout(() => createOffer(p.userId), 200);
+              }
+            });
+          }
+          break;
+
+        // WebRTC signaling messages
+        case 'webrtc_offer':
+          console.log(`📥 Received WebRTC offer from: ${data.fromUserId}`);
+          handleOffer(data.fromUserId, data.offer);
+          break;
+
+        case 'webrtc_answer':
+          console.log(`📥 Received WebRTC answer from: ${data.fromUserId}`);
+          handleAnswer(data.fromUserId, data.answer);
+          break;
+
+        case 'webrtc_ice_candidate':
+          console.log(`🧊 Received ICE candidate from: ${data.fromUserId}`);
+          handleIceCandidate(data.fromUserId, data.candidate);
           break;
 
         case 'transcript':
@@ -250,13 +342,85 @@ export default function MeetingPage() {
     connectWebSocket();
   };
 
+  const toggleVideo = async () => {
+    if (videoEnabled) {
+      // Stop video
+      console.log('📹 Stopping video...');
+      if (localVideoStream) {
+        localVideoStream.getTracks().forEach(track => track.stop());
+        setLocalVideoStream(null);
+      }
+      setVideoEnabled(false);
+
+      // Clean up all peer connections
+      participants.forEach(p => {
+        if (p.userId !== getUserId()) {
+          removePeerConnection(p.userId);
+        }
+      });
+    } else {
+      // Start video
+      console.log('📹 Starting video...');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          },
+          audio: false // Audio is handled separately
+        });
+
+        console.log('✅ Got video stream:', stream);
+        console.log('📹 Video tracks:', stream.getVideoTracks());
+
+        setLocalVideoStream(stream);
+        setVideoEnabled(true);
+
+        // Display local video immediately
+        setTimeout(() => {
+          if (localVideoRef.current) {
+            console.log('📹 Setting srcObject on local video element');
+            localVideoRef.current.srcObject = stream;
+            localVideoRef.current.play().catch(err => {
+              console.error('❌ Error playing local video:', err);
+            });
+          } else {
+            console.error('❌ localVideoRef.current is null!');
+          }
+        }, 100);
+
+        // Send video offers to all existing participants
+        participants.forEach(p => {
+          if (p.userId !== getUserId()) {
+            console.log(`📤 Sending video offer to: ${p.userId}`);
+            // Small delay to ensure stream is ready
+            setTimeout(() => createOffer(p.userId), 100);
+          }
+        });
+      } catch (err: any) {
+        console.error('❌ Camera access error:', err);
+        setError(`Could not access camera: ${err.name} - ${err.message}. Please check permissions.`);
+      }
+    }
+  };
+
   const leaveRoom = () => {
     stopSpeaking();
+
+    // Stop video if enabled
+    if (localVideoStream) {
+      localVideoStream.getTracks().forEach(track => track.stop());
+      setLocalVideoStream(null);
+    }
+    setVideoEnabled(false);
+
     wsRef.current?.close();
     setMode('setup');
     setMyRoomCode('');
     setParticipants([]);
     setTranslations([]);
+    setRemoteStreams(new Map());
   };
 
   const copyRoomCode = () => {
@@ -592,24 +756,83 @@ export default function MeetingPage() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Participants Sidebar */}
-          <div className="lg:col-span-1">
-            <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
-              <h2 className="text-xl font-bold text-white mb-4">Participants</h2>
-              <div className="space-y-3">
-                {participants.map((p) => (
-                  <div key={p.userId} className="p-3 bg-black/20 rounded-lg border border-white/5">
-                    <p className="text-white font-medium">{p.name}</p>
-                    <p className="text-sm text-gray-400">{p.language.split('-')[0].toUpperCase()}</p>
-                  </div>
-                ))}
-              </div>
+        {/* Participants Bar - Horizontal */}
+        <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-4 mb-6">
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-bold text-white whitespace-nowrap">Participants:</h2>
+            <div className="flex gap-3 overflow-x-auto flex-1">
+              {participants.map((p) => (
+                <div key={p.userId} className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/5 whitespace-nowrap">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <p className="text-white font-medium">{p.name}</p>
+                  <span className="text-xs text-gray-400">({p.language.split('-')[0].toUpperCase()})</span>
+                </div>
+              ))}
             </div>
           </div>
+        </div>
 
-          {/* Translation Feed */}
-          <div className="lg:col-span-2">
+        {/* Main Content */}
+        <div>
+            {/* Video Grid */}
+            {videoEnabled && (
+              <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-white">Video</h2>
+                  <button
+                    onClick={toggleVideo}
+                    className="px-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-all text-sm"
+                  >
+                    📹 Stop Video
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Local Video */}
+                  <div className="relative aspect-video bg-black rounded-lg overflow-hidden border-2 border-purple-500">
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
+                      You
+                    </div>
+                  </div>
+
+                  {/* Remote Videos */}
+                  {Array.from(remoteStreams.entries()).map(([userId, stream]) => {
+                    const participant = participants.find(p => p.userId === userId);
+                    return (
+                      <RemoteVideo
+                        key={userId}
+                        stream={stream}
+                        name={participant?.name || 'Unknown'}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Video Toggle Button (when video is off) */}
+            {!videoEnabled && (
+              <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
+                <div className="text-center">
+                  <button
+                    onClick={toggleVideo}
+                    className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-blue-700 transition-all"
+                  >
+                    📹 Enable Video
+                  </button>
+                  <p className="text-sm text-gray-400 mt-2">
+                    Turn on your camera to see other participants
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Translations */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
               <h2 className="text-xl font-bold text-white mb-4">Conversation</h2>
@@ -759,7 +982,6 @@ export default function MeetingPage() {
                 )}
               </div>
             )}
-          </div>
         </div>
       </div>
 

@@ -72,50 +72,85 @@ Answer:`;
    */
   async answerWithHistory(question, allTranscripts, targetLanguage = 'English') {
     try {
-      // Organize transcripts by session
+      // Organize transcripts by session with metadata
       const sessionMap = new Map();
       for (const t of allTranscripts) {
         if (!sessionMap.has(t.session_id)) {
           sessionMap.set(t.session_id, {
             type: t.type,
             title: t.title,
+            created_at: t.created_at,
+            ended_at: t.ended_at,
+            language: t.language,
             transcripts: []
           });
         }
         sessionMap.get(t.session_id).transcripts.push(t);
       }
 
+      // Sort sessions by creation date (most recent first)
+      const sortedSessions = Array.from(sessionMap.entries())
+        .sort((a, b) => new Date(b[1].created_at) - new Date(a[1].created_at));
+
+      // Build session metadata summary
+      let sessionListText = '\n\nAvailable Sessions:\n';
+      sortedSessions.forEach(([sessionId, data], index) => {
+        const sessionType = data.type === 'youtube' ? 'YouTube Video' : 'Meeting';
+        const sessionTitle = data.title || 'Untitled';
+        const createdDate = new Date(data.created_at).toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        sessionListText += `${index + 1}. [${sessionType}] "${sessionTitle}" - ${createdDate}\n`;
+      });
+
       // Build context from recent sessions (limit to prevent token overflow)
       let contextText = '';
       let sessionCount = 0;
       const maxSessions = 5; // Limit context to 5 most recent sessions
 
-      for (const [sessionId, data] of sessionMap) {
+      for (const [sessionId, data] of sortedSessions) {
         if (sessionCount >= maxSessions) break;
 
         const sessionType = data.type === 'youtube' ? 'YouTube Video' : 'Meeting';
         const sessionTitle = data.title || 'Untitled';
-        const texts = data.transcripts
-          .map(t => t.translated_text || t.original_text)
-          .join(' ');
+        const createdDate = new Date(data.created_at).toLocaleString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
 
-        contextText += `\n\n[${sessionType}: ${sessionTitle}]\n${texts}`;
+        const texts = data.transcripts
+          .map(t => {
+            const speaker = t.speaker_name ? `${t.speaker_name}: ` : '';
+            return speaker + (t.translated_text || t.original_text);
+          })
+          .join('\n');
+
+        contextText += `\n\n[${sessionType}: "${sessionTitle}" - ${createdDate}]\n${texts}`;
         sessionCount++;
       }
 
       const prompt = `You are a helpful AI assistant with access to the user's translation history.
+${sessionListText}
 
-User's Translation History:
+Recent Session Content (${sessionCount} most recent):
 ${contextText}
 
 User's Question: ${question}
 
 Instructions:
-1. If the question can be answered from the translation history above, answer it directly and mention which session(s) it came from
-2. If the question is general knowledge, provide a helpful answer
-3. Answer in ${targetLanguage} language
-4. Keep your answer concise and clear (2-5 sentences)
-5. If referencing specific content, mention whether it was from a YouTube video or meeting
+1. For questions about "when was my last meeting/video", refer to the session list above and provide the date and title
+2. For questions about specific session names or topics, search the session list and content
+3. For questions about content, answer from the transcripts and cite which session it came from
+4. For general knowledge questions, provide a helpful answer but mention it's not from the history
+5. Answer in ${targetLanguage} language
+6. Keep your answer concise and clear (2-5 sentences)
+7. When mentioning dates, use the exact dates from the session list
 
 Answer:`;
 
