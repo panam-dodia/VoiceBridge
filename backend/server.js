@@ -61,7 +61,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // Store rooms and participants
-const rooms = new Map(); // roomId -> { participants: Map(...), sessionId, conversationHistory: [] }
+const rooms = new Map(); // roomId -> { participants: Map(...), sessionId, conversationHistory: [], chatHistory: [] }
 
 // Generate random room ID
 function generateRoomId() {
@@ -94,6 +94,7 @@ wss.on('connection', (ws) => {
   let userId = null;
   let currentRoom = null;
   let recognizeStream = null;
+  let typingTimeout = null;
 
   ws.on('message', async (message) => {
     try {
@@ -130,6 +131,19 @@ wss.on('connection', (ws) => {
 
             case 'agent_query_stop':
               handleStopSpeaking();
+              break;
+
+            // Chat messages
+            case 'chat_message':
+              handleChatMessage(data);
+              break;
+
+            case 'typing_start':
+              handleTypingStart();
+              break;
+
+            case 'typing_stop':
+              handleTypingStop();
               break;
 
             // WebRTC signaling
@@ -192,14 +206,16 @@ wss.on('connection', (ws) => {
     rooms.set(roomId, {
       participants: new Map(),
       sessionId: sessionId,
-      conversationHistory: []
+      conversationHistory: [],
+      chatHistory: [] // Store chat messages
     });
 
     rooms.get(roomId).participants.set(userId, {
       ws: ws,
       language: data.language,
       name: data.name,
-      recognizeStream: null
+      recognizeStream: null,
+      isTyping: false
     });
 
     currentRoom = roomId;
@@ -230,11 +246,14 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    rooms.get(roomId).participants.set(userId, {
+    const room = rooms.get(roomId);
+
+    room.participants.set(userId, {
       ws: ws,
       language: data.language,
       name: data.name,
-      recognizeStream: null
+      recognizeStream: null,
+      isTyping: false
     });
 
     currentRoom = roomId;
@@ -245,7 +264,13 @@ wss.on('connection', (ws) => {
       type: 'room_joined',
       roomId: roomId,
       userId: userId,
-      sessionId: rooms.get(roomId).sessionId
+      sessionId: room.sessionId
+    }));
+
+    // Send existing chat history to new participant
+    ws.send(JSON.stringify({
+      type: 'chat_history',
+      messages: room.chatHistory
     }));
 
     broadcastParticipants(roomId);
@@ -348,6 +373,102 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'ready' }));
   }
 
+  function handleChatMessage(data) {
+    if (!currentRoom || !userId) return;
+
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    const participant = room.participants.get(userId);
+    if (!participant) return;
+
+    const chatMessage = {
+      id: Date.now().toString(),
+      userId: userId,
+      userName: participant.name,
+      message: data.message,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log(`💬 Chat message from ${participant.name}: ${data.message}`);
+
+    // Store in room chat history
+    room.chatHistory.push(chatMessage);
+
+    // Broadcast to all participants
+    room.participants.forEach((p) => {
+      p.ws.send(JSON.stringify({
+        type: 'chat_message',
+        ...chatMessage
+      }));
+    });
+
+    // Clear typing indicator for this user
+    handleTypingStop();
+  }
+
+  function handleTypingStart() {
+    if (!currentRoom || !userId) return;
+
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    const participant = room.participants.get(userId);
+    if (!participant) return;
+
+    participant.isTyping = true;
+
+    // Broadcast typing status to others
+    room.participants.forEach((p, pId) => {
+      if (pId !== userId) {
+        p.ws.send(JSON.stringify({
+          type: 'user_typing',
+          userId: userId,
+          userName: participant.name,
+          isTyping: true
+        }));
+      }
+    });
+
+    // Auto-clear typing after 3 seconds of inactivity
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+    }
+    typingTimeout = setTimeout(() => {
+      handleTypingStop();
+    }, 3000);
+  }
+
+  function handleTypingStop() {
+    if (!currentRoom || !userId) return;
+
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    const participant = room.participants.get(userId);
+    if (!participant) return;
+
+    participant.isTyping = false;
+
+    // Clear timeout
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+      typingTimeout = null;
+    }
+
+    // Broadcast typing stopped to others
+    room.participants.forEach((p, pId) => {
+      if (pId !== userId) {
+        p.ws.send(JSON.stringify({
+          type: 'user_typing',
+          userId: userId,
+          userName: participant.name,
+          isTyping: false
+        }));
+      }
+    });
+  }
+
   function handleWebRTCSignaling(data) {
     if (!currentRoom || !userId) return;
 
@@ -382,6 +503,9 @@ wss.on('connection', (ws) => {
   function handleDisconnect() {
     if (recognizeStream) {
       recognizeStream.end();
+    }
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
     }
     if (currentRoom && userId) {
       const room = rooms.get(currentRoom);

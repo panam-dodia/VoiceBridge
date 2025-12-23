@@ -6,6 +6,7 @@ import { getWebSocketURL } from '@/lib/api';
 import { getUserId } from '@/lib/userStore';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 
 declare global {
   interface Window {
@@ -47,6 +48,71 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+interface TextChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  message: string;
+  timestamp: string;
+}
+
+interface TypingUser {
+  userId: string;
+  userName: string;
+}
+
+// Utility function to generate consistent color for a user
+function getUserColor(userId: string): string {
+  const colors = [
+    'bg-red-500',
+    'bg-blue-500',
+    'bg-green-500',
+    'bg-yellow-500',
+    'bg-purple-500',
+    'bg-pink-500',
+    'bg-indigo-500',
+    'bg-teal-500',
+    'bg-orange-500',
+    'bg-cyan-500',
+  ];
+
+  // Generate a consistent hash from userId
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  return colors[Math.abs(hash) % colors.length];
+}
+
+// Utility function to get initials from name
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.substring(0, 1).toUpperCase();
+}
+
+// Avatar component for participants without video
+function ParticipantAvatar({ name, userId }: { name: string; userId: string }) {
+  const initials = getInitials(name);
+  const colorClass = getUserColor(userId);
+
+  return (
+    <div className="relative aspect-video bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg overflow-hidden border border-white/10">
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className={`w-24 h-24 rounded-full ${colorClass} flex items-center justify-center`}>
+          <span className="text-white text-3xl font-bold">{initials}</span>
+        </div>
+      </div>
+      <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
+        {name}
+      </div>
+    </div>
+  );
+}
+
 // Remote Video Component
 function RemoteVideo({ stream, name }: { stream: MediaStream; name: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -68,6 +134,17 @@ function RemoteVideo({ stream, name }: { stream: MediaStream; name: string }) {
       <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
         {name}
       </div>
+    </div>
+  );
+}
+
+// Skeleton loader for participants waiting
+function ParticipantSkeleton() {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/5 whitespace-nowrap animate-pulse">
+      <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+      <div className="h-4 w-20 bg-gray-600 rounded"></div>
+      <div className="h-3 w-8 bg-gray-700 rounded"></div>
     </div>
   );
 }
@@ -96,9 +173,16 @@ export default function MeetingPage() {
 
   // Video states
   const [videoEnabled, setVideoEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
-  const [myUserId, setMyUserId] = useState<string>('');
+
+  // Chat panel states
+  const [chatOpen, setChatOpen] = useState(false);
+  const [textChatMessages, setTextChatMessages] = useState<TextChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -107,6 +191,8 @@ export default function MeetingPage() {
   const recognitionRef = useRef<any>(null);
   const qaAudioRef = useRef<HTMLAudioElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebRTC handlers
   const handleRemoteStream = useCallback((userId: string, stream: MediaStream) => {
@@ -151,6 +237,21 @@ export default function MeetingPage() {
     translationsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [translations]);
 
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [textChatMessages]);
+
+  // Increment unread count when chat is closed
+  useEffect(() => {
+    if (!chatOpen && textChatMessages.length > 0) {
+      const lastMessage = textChatMessages[textChatMessages.length - 1];
+      if (lastMessage.userId !== getUserId()) {
+        setUnreadCount(prev => prev + 1);
+      }
+    }
+  }, [textChatMessages, chatOpen]);
+
   const connectWebSocket = () => {
     const ws = new WebSocket(getWebSocketURL());
 
@@ -187,6 +288,7 @@ export default function MeetingPage() {
           setMyRoomCode(data.roomId);
           setSessionId(data.sessionId);
           setMode('room');
+          toast.success(`Room created! Code: ${data.roomId}`);
           break;
 
         case 'room_joined':
@@ -194,6 +296,7 @@ export default function MeetingPage() {
           setMyRoomCode(data.roomId);
           setSessionId(data.sessionId);
           setMode('room');
+          toast.success('Successfully joined room!');
           break;
 
         case 'participants_update':
@@ -248,6 +351,37 @@ export default function MeetingPage() {
           const audioUrl = URL.createObjectURL(audioBlob);
           const audio = new Audio(audioUrl);
           audio.play().catch(err => console.error('Audio playback error:', err));
+          break;
+
+        // Chat messages
+        case 'chat_history':
+          console.log('📜 Received chat history:', data.messages);
+          setTextChatMessages(data.messages);
+          break;
+
+        case 'chat_message':
+          console.log('💬 Received chat message:', data);
+          setTextChatMessages(prev => [...prev, {
+            id: data.id,
+            userId: data.userId,
+            userName: data.userName,
+            message: data.message,
+            timestamp: data.timestamp
+          }]);
+          break;
+
+        case 'user_typing':
+          console.log('⌨️ User typing:', data.userName, data.isTyping);
+          if (data.isTyping) {
+            setTypingUsers(prev => {
+              if (!prev.find(u => u.userId === data.userId)) {
+                return [...prev, { userId: data.userId, userName: data.userName }];
+              }
+              return prev;
+            });
+          } else {
+            setTypingUsers(prev => prev.filter(u => u.userId !== data.userId));
+          }
           break;
 
         case 'error':
@@ -351,13 +485,7 @@ export default function MeetingPage() {
         setLocalVideoStream(null);
       }
       setVideoEnabled(false);
-
-      // Clean up all peer connections
-      participants.forEach(p => {
-        if (p.userId !== getUserId()) {
-          removePeerConnection(p.userId);
-        }
-      });
+      toast.success('Camera turned off');
     } else {
       // Start video
       console.log('📹 Starting video...');
@@ -376,6 +504,7 @@ export default function MeetingPage() {
 
         setLocalVideoStream(stream);
         setVideoEnabled(true);
+        toast.success('Camera turned on');
 
         // Display local video immediately
         setTimeout(() => {
@@ -400,8 +529,73 @@ export default function MeetingPage() {
         });
       } catch (err: any) {
         console.error('❌ Camera access error:', err);
-        setError(`Could not access camera: ${err.name} - ${err.message}. Please check permissions.`);
+        const errorMsg = `Could not access camera: ${err.name} - ${err.message}`;
+        setError(errorMsg);
+        toast.error('Camera access denied. Please check permissions.');
       }
+    }
+  };
+
+  const toggleAudio = () => {
+    const newState = !audioEnabled;
+    setAudioEnabled(newState);
+    toast.success(newState ? 'Microphone unmuted' : 'Microphone muted');
+  };
+
+  const toggleChat = () => {
+    setChatOpen(!chatOpen);
+    if (!chatOpen) {
+      setUnreadCount(0);
+    }
+  };
+
+  const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setChatInput(e.target.value);
+
+    // Send typing indicator
+    if (e.target.value.length > 0) {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      wsRef.current?.send(JSON.stringify({
+        type: 'typing_start'
+      }));
+
+      // Stop typing after 2 seconds of no input
+      typingTimeoutRef.current = setTimeout(() => {
+        wsRef.current?.send(JSON.stringify({
+          type: 'typing_stop'
+        }));
+      }, 2000);
+    } else {
+      wsRef.current?.send(JSON.stringify({
+        type: 'typing_stop'
+      }));
+    }
+  };
+
+  const sendChatMessage = () => {
+    if (!chatInput.trim()) return;
+
+    wsRef.current?.send(JSON.stringify({
+      type: 'chat_message',
+      message: chatInput.trim()
+    }));
+
+    setChatInput('');
+
+    // Clear typing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+  };
+
+  const handleChatKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
     }
   };
 
@@ -421,11 +615,14 @@ export default function MeetingPage() {
     setParticipants([]);
     setTranslations([]);
     setRemoteStreams(new Map());
+    setTextChatMessages([]);
+    setChatOpen(false);
+    setUnreadCount(0);
   };
 
   const copyRoomCode = () => {
     navigator.clipboard.writeText(myRoomCode);
-    alert('Room code copied to clipboard!');
+    toast.success('Room code copied to clipboard!');
   };
 
   // Q&A Functions
@@ -446,7 +643,7 @@ export default function MeetingPage() {
 
     const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
     recognitionRef.current = new SpeechRecognition();
-    recognitionRef.current.lang = language; // Use meeting language
+    recognitionRef.current.lang = language;
     recognitionRef.current.continuous = false;
     recognitionRef.current.interimResults = false;
 
@@ -591,11 +788,20 @@ export default function MeetingPage() {
     await sendQuestion();
   };
 
+  // Format timestamp
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopSpeaking();
       wsRef.current?.close();
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -740,122 +946,95 @@ export default function MeetingPage() {
             <div className="flex items-center gap-4">
               <button
                 onClick={copyRoomCode}
-                className="text-sm text-gray-300 hover:text-white transition-colors"
+                className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors border border-white/10 rounded-lg hover:bg-white/5"
               >
                 📋 Copy Code
-              </button>
-              <button
-                onClick={leaveRoom}
-                className="px-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-all"
-              >
-                Leave Room
               </button>
             </div>
           </div>
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* Participants Bar - Horizontal */}
-        <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-4 mb-6">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-bold text-white whitespace-nowrap">Participants:</h2>
-            <div className="flex gap-3 overflow-x-auto flex-1">
-              {participants.map((p) => (
-                <div key={p.userId} className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/5 whitespace-nowrap">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <p className="text-white font-medium">{p.name}</p>
-                  <span className="text-xs text-gray-400">({p.language.split('-')[0].toUpperCase()})</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
+      <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6">
         {/* Main Content */}
-        <div>
-            {/* Video Grid */}
-            {videoEnabled && (
-              <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-white">Video</h2>
-                  <button
-                    onClick={toggleVideo}
-                    className="px-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-all text-sm"
-                  >
-                    📹 Stop Video
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Local Video */}
-                  <div className="relative aspect-video bg-black rounded-lg overflow-hidden border-2 border-purple-500">
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
-                      You
-                    </div>
-                  </div>
-
-                  {/* Remote Videos */}
-                  {Array.from(remoteStreams.entries()).map(([userId, stream]) => {
-                    const participant = participants.find(p => p.userId === userId);
-                    return (
-                      <RemoteVideo
-                        key={userId}
-                        stream={stream}
-                        name={participant?.name || 'Unknown'}
-                      />
-                    );
-                  })}
+        <div className={`flex-1 transition-all ${chatOpen ? 'mr-0' : 'mr-0'}`}>
+          <div className="relative pb-24">
+            {/* Participants Bar - Horizontal */}
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-4 mb-6">
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-bold text-white whitespace-nowrap">Participants:</h2>
+                <div className="flex gap-3 overflow-x-auto flex-1">
+                  {participants.length === 0 ? (
+                    <>
+                      <ParticipantSkeleton />
+                      <ParticipantSkeleton />
+                    </>
+                  ) : (
+                    participants.map((p) => (
+                      <div key={p.userId} className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/5 whitespace-nowrap">
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <p className="text-white font-medium">{p.name}</p>
+                        <span className="text-xs text-gray-400">({p.language.split('-')[0].toUpperCase()})</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Video Toggle Button (when video is off) */}
-            {!videoEnabled && (
+            {/* Video Grid */}
+            {participants.length > 0 && (
               <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
-                <div className="text-center">
-                  <button
-                    onClick={toggleVideo}
-                    className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-blue-700 transition-all"
-                  >
-                    📹 Enable Video
-                  </button>
-                  <p className="text-sm text-gray-400 mt-2">
-                    Turn on your camera to see other participants
-                  </p>
+                <h2 className="text-xl font-bold text-white mb-4">Video</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Local Video or Avatar */}
+                  {videoEnabled ? (
+                    <div className="relative aspect-video bg-black rounded-lg overflow-hidden border-2 border-purple-500">
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 rounded-full text-white text-sm">
+                        You
+                      </div>
+                    </div>
+                  ) : (
+                    <ParticipantAvatar
+                      name={name || 'You'}
+                      userId={getUserId()}
+                    />
+                  )}
+
+                  {/* Remote Participants */}
+                  {participants
+                    .filter(p => p.userId !== getUserId())
+                    .map(p => {
+                      const hasVideo = remoteStreams.has(p.userId);
+                      return hasVideo ? (
+                        <RemoteVideo
+                          key={p.userId}
+                          stream={remoteStreams.get(p.userId)!}
+                          name={p.name}
+                        />
+                      ) : (
+                        <ParticipantAvatar
+                          key={p.userId}
+                          name={p.name}
+                          userId={p.userId}
+                        />
+                      );
+                    })}
                 </div>
               </div>
             )}
 
             {/* Translations */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-6">
-              <h2 className="text-xl font-bold text-white mb-4">Conversation</h2>
-              <div className="space-y-3 max-h-96 overflow-y-auto mb-4">
-                {translations.length === 0 ? (
-                  <p className="text-gray-400 text-center py-8">No messages yet. Start speaking!</p>
-                ) : (
-                  translations.map((t, idx) => (
-                    <div key={idx} className="p-4 bg-black/20 rounded-lg border border-white/5">
-                      <p className="text-sm text-purple-400 font-medium mb-1">{t.speaker}</p>
-                      <p className="text-white mb-1">{t.translatedText}</p>
-                      <p className="text-xs text-gray-500">{t.originalText}</p>
-                    </div>
-                  ))
-                )}
-                <div ref={translationsEndRef} />
-              </div>
-            </div>
-
-            {/* Speaking Controls */}
-            <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-white">Your Microphone</h3>
+                <h2 className="text-xl font-bold text-white">Conversation</h2>
                 {isSpeaking && (
                   <span className="flex items-center gap-2 text-purple-400">
                     <span className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></span>
@@ -870,20 +1049,20 @@ export default function MeetingPage() {
                 </div>
               )}
 
-              <button
-                onClick={isSpeaking ? stopSpeaking : startSpeaking}
-                className={`w-full px-6 py-8 rounded-xl font-bold text-lg transition-all ${
-                  isSpeaking
-                    ? 'bg-red-600 text-white scale-105 animate-pulse'
-                    : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
-                }`}
-              >
-                {isSpeaking ? '⏹️ Stop Speaking' : '🎤 Start Speaking'}
-              </button>
-
-              <p className="text-sm text-gray-400 text-center mt-3">
-                Click to start speaking, click again to stop. Your speech will be translated for all participants.
-              </p>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {translations.length === 0 ? (
+                  <p className="text-gray-400 text-center py-8">No messages yet. Click the mic button below to start speaking!</p>
+                ) : (
+                  translations.map((t, idx) => (
+                    <div key={idx} className="p-4 bg-black/20 rounded-lg border border-white/5">
+                      <p className="text-sm text-purple-400 font-medium mb-1">{t.speaker}</p>
+                      <p className="text-white mb-1">{t.translatedText}</p>
+                      <p className="text-xs text-gray-500">{t.originalText}</p>
+                    </div>
+                  ))
+                )}
+                <div ref={translationsEndRef} />
+              </div>
             </div>
 
             {/* Q&A Section */}
@@ -915,7 +1094,6 @@ export default function MeetingPage() {
                   </div>
                 </div>
 
-                {/* Chat History */}
                 <div className="h-[300px] overflow-y-auto mb-4 space-y-3 custom-scrollbar">
                   {chatHistory.map((message, index) => (
                     <div
@@ -933,13 +1111,17 @@ export default function MeetingPage() {
                     </div>
                   ))}
                   {askingQuestion && (
-                    <div className="text-center text-gray-400 animate-pulse">
-                      Thinking...
+                    <div className="bg-white/10 mr-12 p-4 rounded-lg">
+                      <div className="text-xs text-white/60 mb-2">AI is typing...</div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Input Section */}
                 {chatMode === 'text' ? (
                   <div className="flex gap-2">
                     <input
@@ -982,6 +1164,174 @@ export default function MeetingPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Chat Sidebar */}
+        {chatOpen && (
+          <div className="w-80 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 flex flex-col h-[calc(100vh-140px)] sticky top-6">
+            {/* Chat Header */}
+            <div className="p-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">Chat</h3>
+              <button
+                onClick={toggleChat}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              {textChatMessages.length === 0 ? (
+                <div className="text-center text-gray-400 py-8">
+                  No messages yet
+                </div>
+              ) : (
+                textChatMessages.map((msg) => {
+                  const isMe = msg.userId === getUserId();
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className={`max-w-[80%] ${isMe ? 'order-2' : 'order-1'}`}>
+                        <div className="text-xs text-gray-400 mb-1 px-2">
+                          {isMe ? 'You' : msg.userName} • {formatTime(msg.timestamp)}
+                        </div>
+                        <div
+                          className={`p-3 rounded-lg ${
+                            isMe
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white/10 text-white'
+                          }`}
+                        >
+                          {msg.message}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Typing Indicator */}
+            {typingUsers.length > 0 && (
+              <div className="px-4 py-2 text-sm text-gray-400">
+                {typingUsers.map(u => u.userName).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+              </div>
+            )}
+
+            {/* Chat Input */}
+            <div className="p-4 border-t border-white/10">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={handleChatInputChange}
+                  onKeyPress={handleChatKeyPress}
+                  placeholder="Type a message..."
+                  className="flex-1 px-4 py-2 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors text-sm"
+                />
+                <button
+                  onClick={sendChatMessage}
+                  disabled={!chatInput.trim()}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fixed Control Bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-6">
+        <div className="flex items-center gap-4 bg-gray-900/95 backdrop-blur-sm px-8 py-4 rounded-full shadow-2xl border border-white/10">
+          {/* Microphone Button */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={isSpeaking ? stopSpeaking : startSpeaking}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                isSpeaking
+                  ? 'bg-green-600 hover:bg-green-700 text-white animate-pulse'
+                  : audioEnabled
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white'
+              }`}
+              title={isSpeaking ? 'Stop Speaking' : 'Start Speaking'}
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <span className="text-xs text-white/80">
+              {isSpeaking ? 'Speaking' : 'Mic'}
+            </span>
+          </div>
+
+          {/* Camera Button */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={toggleVideo}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                videoEnabled
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white'
+              }`}
+              title={videoEnabled ? 'Stop Video' : 'Start Video'}
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+              </svg>
+            </button>
+            <span className="text-xs text-white/80">
+              {videoEnabled ? 'Stop Video' : 'Start Video'}
+            </span>
+          </div>
+
+          {/* Chat Button */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={toggleChat}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all relative ${
+                chatOpen
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white'
+              }`}
+              title="Chat"
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" />
+              </svg>
+              {unreadCount > 0 && !chatOpen && (
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </div>
+              )}
+            </button>
+            <span className="text-xs text-white/80">Chat</span>
+          </div>
+
+          {/* Leave Button */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={leaveRoom}
+              className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all"
+              title="Leave Meeting"
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <span className="text-xs text-white/80">Leave</span>
+          </div>
         </div>
       </div>
 

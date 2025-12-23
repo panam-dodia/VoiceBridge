@@ -775,8 +775,13 @@ export default function YouTubePage() {
                 </div>
               ))}
               {askingQuestion && (
-                <div className="text-center text-gray-400 animate-pulse">
-                  Thinking...
+                <div className="bg-white/10 mr-12 p-4 rounded-lg">
+                  <div className="text-xs text-white/60 mb-2">AI is typing...</div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
                 </div>
               )}
             </div>
