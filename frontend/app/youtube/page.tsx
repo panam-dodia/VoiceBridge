@@ -175,16 +175,17 @@ export default function YouTubePage() {
       setSessionId(response.sessionId);
       setTranscript(response.transcript);
 
-      // Detect gender
+      // Detect gender FIRST and wait for it to complete
+      let detectedGender: 'male' | 'female' = 'male';
       if (response.transcript.length > 0) {
-        detectGender(response.transcript);
+        detectedGender = await detectGender(response.transcript);
       }
 
       // Load YouTube Player
       loadYouTubeAPI(extractedId);
 
-      // Start preloading translations and audio
-      await initialPreload(response.transcript, targetLanguage);
+      // Start preloading translations and audio with the detected gender
+      await initialPreload(response.transcript, targetLanguage, detectedGender);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load transcript');
       console.error('Error loading transcript:', err);
@@ -193,14 +194,16 @@ export default function YouTubePage() {
     }
   };
 
-  const detectGender = async (transcriptData: Transcript[]) => {
+  const detectGender = async (transcriptData: Transcript[]): Promise<'male' | 'female'> => {
     try {
       const sample = transcriptData.slice(0, 5).map(s => s.text).join(' ');
       const response = await youtubeAPI.detectGender(sample);
       setVoiceGender(response.gender);
       console.log(`Detected voice gender: ${response.gender}`);
+      return response.gender;
     } catch (err) {
       console.error('Gender detection error:', err);
+      return 'male'; // Default fallback
     }
   };
 
@@ -285,7 +288,7 @@ export default function YouTubePage() {
     return null;
   };
 
-  const initialPreload = async (transcriptData: Transcript[], language: string) => {
+  const initialPreload = async (transcriptData: Transcript[], language: string, gender: 'male' | 'female') => {
     setIsPreloading(true);
     setPreloadProgress(0);
     setPreloadMessage('Preloading translations and audio...');
@@ -297,22 +300,22 @@ export default function YouTubePage() {
         const originalText = transcriptData[i].text;
         const translatedText = await translateText(originalText, i, language);
 
-        // Generate audio
-        const audioData = await youtubeAPI.textToSpeech(translatedText, voiceGender);
+        // Generate audio with the detected gender
+        const audioData = await youtubeAPI.textToSpeech(translatedText, gender);
         const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
         const audioUrl = URL.createObjectURL(audioBlob);
         audioCache.current.set(i, audioUrl);
 
         const progress = Math.round(((i + 1) / segmentsToPreload) * 100);
         setPreloadProgress(progress);
-        console.log(`✓ Pre-loaded segment ${i + 1}/${segmentsToPreload}`);
+        console.log(`✓ Pre-loaded segment ${i + 1}/${segmentsToPreload} with ${gender} voice`);
       } catch (err) {
         console.error(`Failed to preload segment ${i}:`, err);
       }
     }
 
     setIsPreloading(false);
-    console.log(`✓ Pre-loading complete!`);
+    console.log(`✓ Pre-loading complete with ${gender} voice!`);
   };
 
   const translateText = async (text: string, index: number, language: string): Promise<string> => {

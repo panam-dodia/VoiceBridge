@@ -267,10 +267,11 @@ wss.on('connection', (ws) => {
       sessionId: room.sessionId
     }));
 
-    // Send existing chat history to new participant
+    // Send existing chat history to new participant (translated to their language)
+    const translatedHistory = await translateChatHistory(room.chatHistory, data.language);
     ws.send(JSON.stringify({
       type: 'chat_history',
-      messages: room.chatHistory
+      messages: translatedHistory
     }));
 
     broadcastParticipants(roomId);
@@ -373,7 +374,7 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'ready' }));
   }
 
-  function handleChatMessage(data) {
+  async function handleChatMessage(data) {
     if (!currentRoom || !userId) return;
 
     const room = rooms.get(currentRoom);
@@ -387,6 +388,7 @@ wss.on('connection', (ws) => {
       userId: userId,
       userName: participant.name,
       message: data.message,
+      originalLanguage: participant.language,
       timestamp: new Date().toISOString()
     };
 
@@ -395,13 +397,37 @@ wss.on('connection', (ws) => {
     // Store in room chat history
     room.chatHistory.push(chatMessage);
 
-    // Broadcast to all participants
-    room.participants.forEach((p) => {
-      p.ws.send(JSON.stringify({
-        type: 'chat_message',
-        ...chatMessage
-      }));
-    });
+    // Translate and broadcast to all participants
+    for (const [participantId, p] of room.participants.entries()) {
+      try {
+        let translatedMessage = data.message;
+        const targetLang = getLanguageName(p.language);
+        const sourceLang = getLanguageName(participant.language);
+
+        // Only translate if languages are different
+        if (sourceLang !== targetLang) {
+          translatedMessage = await aiService.translateText(data.message, targetLang);
+          console.log(`🌍 Translated chat from ${sourceLang} to ${targetLang}: "${translatedMessage}"`);
+        }
+
+        p.ws.send(JSON.stringify({
+          type: 'chat_message',
+          id: chatMessage.id,
+          userId: userId,
+          userName: participant.name,
+          message: translatedMessage,
+          originalMessage: data.message,
+          timestamp: chatMessage.timestamp
+        }));
+      } catch (error) {
+        console.error(`Chat translation error for participant ${participantId}:`, error);
+        // Send original message if translation fails
+        p.ws.send(JSON.stringify({
+          type: 'chat_message',
+          ...chatMessage
+        }));
+      }
+    }
 
     // Clear typing indicator for this user
     handleTypingStop();
@@ -525,6 +551,39 @@ wss.on('connection', (ws) => {
     }
   }
 });
+
+// Translate chat history for a new participant
+async function translateChatHistory(chatHistory, targetLanguage) {
+  const translatedMessages = [];
+
+  for (const msg of chatHistory) {
+    try {
+      let translatedMessage = msg.message;
+      const targetLang = getLanguageName(targetLanguage);
+      const sourceLang = getLanguageName(msg.originalLanguage || 'en-US');
+
+      // Only translate if languages are different
+      if (sourceLang !== targetLang) {
+        translatedMessage = await aiService.translateText(msg.message, targetLang);
+      }
+
+      translatedMessages.push({
+        id: msg.id,
+        userId: msg.userId,
+        userName: msg.userName,
+        message: translatedMessage,
+        originalMessage: msg.message,
+        timestamp: msg.timestamp
+      });
+    } catch (error) {
+      console.error('Error translating chat history message:', error);
+      // If translation fails, send original message
+      translatedMessages.push(msg);
+    }
+  }
+
+  return translatedMessages;
+}
 
 // Broadcast participant list to all in room
 function broadcastParticipants(roomId) {

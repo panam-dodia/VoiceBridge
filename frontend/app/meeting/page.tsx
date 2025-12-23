@@ -53,12 +53,20 @@ interface TextChatMessage {
   userId: string;
   userName: string;
   message: string;
+  originalMessage?: string;
   timestamp: string;
 }
 
 interface TypingUser {
   userId: string;
   userName: string;
+}
+
+interface ErrorWithRecovery {
+  message: string;
+  suggestions: string[];
+  actionLabel?: string;
+  action?: () => void;
 }
 
 // Utility function to generate consistent color for a user
@@ -160,8 +168,29 @@ export default function MeetingPage() {
   const [translations, setTranslations] = useState<Translation[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ErrorWithRecovery | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Helper function to create error objects with recovery suggestions
+  const createError = (message: string, suggestions: string[], actionLabel?: string, action?: () => void): ErrorWithRecovery => ({
+    message,
+    suggestions,
+    actionLabel,
+    action
+  });
+
+  // Check for room code in URL on component mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomCodeFromUrl = urlParams.get('room');
+      if (roomCodeFromUrl) {
+        setRoomCode(roomCodeFromUrl.toUpperCase());
+        setJoinMode('join');
+        toast.success(`Ready to join room ${roomCodeFromUrl.toUpperCase()}`);
+      }
+    }
+  }, []);
 
   // Q&A states
   const [question, setQuestion] = useState('');
@@ -385,20 +414,41 @@ export default function MeetingPage() {
           break;
 
         case 'error':
-          setError(data.message);
+          setError(createError(
+            data.message,
+            ['Check if the room code is correct', 'Make sure you have a stable internet connection', 'Try creating a new room instead'],
+            'Try Again',
+            () => setError(null)
+          ));
           break;
       }
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      setError('Connection error. Please try again.');
+      setError(createError(
+        'Connection error occurred',
+        ['Check your internet connection', 'Verify the server is running', 'Try refreshing the page'],
+        'Retry Connection',
+        () => {
+          setError(null);
+          connectWebSocket();
+        }
+      ));
     };
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
       if (mode === 'room') {
-        setError('Disconnected from room');
+        setError(createError(
+          'Disconnected from room',
+          ['Your internet connection may be unstable', 'The room may have been closed', 'The server may have restarted'],
+          'Rejoin Room',
+          () => {
+            setError(null);
+            connectWebSocket();
+          }
+        ));
       }
     };
 
@@ -443,7 +493,15 @@ export default function MeetingPage() {
       setCurrentTranscript('');
     } catch (err) {
       console.error('Microphone access error:', err);
-      setError('Could not access microphone. Please check permissions.');
+      setError(createError(
+        'Could not access microphone',
+        ['Click the microphone icon in your browser\'s address bar', 'Grant microphone permission when prompted', 'Check if another application is using the microphone', 'Try closing other tabs that might be using audio'],
+        'Request Permission Again',
+        () => {
+          setError(null);
+          startSpeaking();
+        }
+      ));
     }
   };
 
@@ -463,16 +521,26 @@ export default function MeetingPage() {
 
   const handleJoinRoom = () => {
     if (!name.trim()) {
-      setError('Please enter your name');
+      setError(createError(
+        'Name is required',
+        ['Enter your name in the field above', 'This helps other participants identify you'],
+        'OK',
+        () => setError(null)
+      ));
       return;
     }
 
     if (joinMode === 'join' && !roomCode.trim()) {
-      setError('Please enter room code');
+      setError(createError(
+        'Room code is required',
+        ['Enter the 6-character room code shared with you', 'Ask the room creator for the invite link', 'Or create a new room instead'],
+        'OK',
+        () => setError(null)
+      ));
       return;
     }
 
-    setError('');
+    setError(null);
     connectWebSocket();
   };
 
@@ -529,8 +597,15 @@ export default function MeetingPage() {
         });
       } catch (err: any) {
         console.error('❌ Camera access error:', err);
-        const errorMsg = `Could not access camera: ${err.name} - ${err.message}`;
-        setError(errorMsg);
+        setError(createError(
+          'Could not access camera',
+          ['Click the camera icon in your browser\'s address bar to grant permission', 'Make sure no other application is using the camera', 'Check if your camera is properly connected', 'Try closing other video conferencing apps'],
+          'Request Permission Again',
+          () => {
+            setError(null);
+            toggleVideo();
+          }
+        ));
         toast.error('Camera access denied. Please check permissions.');
       }
     }
@@ -623,6 +698,12 @@ export default function MeetingPage() {
   const copyRoomCode = () => {
     navigator.clipboard.writeText(myRoomCode);
     toast.success('Room code copied to clipboard!');
+  };
+
+  const copyInviteLink = () => {
+    const inviteUrl = `${window.location.origin}/meeting?room=${myRoomCode}`;
+    navigator.clipboard.writeText(inviteUrl);
+    toast.success('Invite link copied to clipboard!');
   };
 
   // Q&A Functions
@@ -908,10 +989,38 @@ export default function MeetingPage() {
                 </div>
               )}
 
-              {/* Error Message */}
+              {/* Error Message with Recovery Suggestions */}
               {error && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
-                  {error}
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-red-400 font-medium mb-2">{error.message}</p>
+                      {error.suggestions.length > 0 && (
+                        <div className="space-y-1 mb-3">
+                          <p className="text-red-300/70 text-sm font-medium">Try these solutions:</p>
+                          <ul className="space-y-1">
+                            {error.suggestions.map((suggestion, idx) => (
+                              <li key={idx} className="text-red-300/60 text-sm flex items-start gap-2">
+                                <span className="text-red-400 mt-0.5">•</span>
+                                <span>{suggestion}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {error.actionLabel && error.action && (
+                        <button
+                          onClick={error.action}
+                          className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-sm font-medium transition-colors"
+                        >
+                          {error.actionLabel}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -949,6 +1058,12 @@ export default function MeetingPage() {
                 className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors border border-white/10 rounded-lg hover:bg-white/5"
               >
                 📋 Copy Code
+              </button>
+              <button
+                onClick={copyInviteLink}
+                className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors border border-white/10 rounded-lg hover:bg-white/5"
+              >
+                🔗 Copy Invite Link
               </button>
             </div>
           </div>
@@ -1192,14 +1307,22 @@ export default function MeetingPage() {
               ) : (
                 textChatMessages.map((msg) => {
                   const isMe = msg.userId === getUserId();
+                  const isTranslated = msg.originalMessage && msg.originalMessage !== msg.message;
                   return (
                     <div
                       key={msg.id}
                       className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
                     >
                       <div className={`max-w-[80%] ${isMe ? 'order-2' : 'order-1'}`}>
-                        <div className="text-xs text-gray-400 mb-1 px-2">
-                          {isMe ? 'You' : msg.userName} • {formatTime(msg.timestamp)}
+                        <div className="text-xs text-gray-400 mb-1 px-2 flex items-center gap-1">
+                          <span>{isMe ? 'You' : msg.userName} • {formatTime(msg.timestamp)}</span>
+                          {isTranslated && (
+                            <span className="text-blue-400 flex items-center gap-1" title="Translated message">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M7 2a1 1 0 011 1v1h3a1 1 0 110 2H9.578a18.87 18.87 0 01-1.724 4.78c.29.354.596.696.914 1.026a1 1 0 11-1.44 1.389c-.188-.196-.373-.396-.554-.6a19.098 19.098 0 01-3.107 3.567 1 1 0 01-1.334-1.49 17.087 17.087 0 003.13-3.733 18.992 18.992 0 01-1.487-2.494 1 1 0 111.79-.89c.234.47.489.928.764 1.372.417-.934.752-1.913.997-2.927H3a1 1 0 110-2h3V3a1 1 0 011-1zm6 6a1 1 0 01.894.553l2.991 5.982a.869.869 0 01.02.037l.99 1.98a1 1 0 11-1.79.895L15.383 16h-4.764l-.724 1.447a1 1 0 11-1.788-.894l.99-1.98.019-.038 2.99-5.982A1 1 0 0113 8zm-1.382 6h2.764L13 11.236 11.618 14z" clipRule="evenodd" />
+                              </svg>
+                            </span>
+                          )}
                         </div>
                         <div
                           className={`p-3 rounded-lg ${
@@ -1207,8 +1330,14 @@ export default function MeetingPage() {
                               ? 'bg-purple-600 text-white'
                               : 'bg-white/10 text-white'
                           }`}
+                          title={isTranslated ? `Original: ${msg.originalMessage}` : ''}
                         >
                           {msg.message}
+                          {isTranslated && (
+                            <div className="text-xs opacity-60 mt-1 pt-1 border-t border-white/20">
+                              Original: {msg.originalMessage}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
