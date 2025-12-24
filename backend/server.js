@@ -667,9 +667,9 @@ async function translateAndBroadcast(roomId, speakerId, text, sourceLanguage, sp
         timestamp: Date.now()
       }));
 
-      // Generate and send audio
+      // Generate and send audio with language support
       try {
-        const audioBuffer = await ttsService.textToSpeech(translatedText);
+        const audioBuffer = await ttsService.textToSpeech(translatedText, null, 'male', targetLang);
 
         participant.ws.send(JSON.stringify({
           type: 'audio',
@@ -727,9 +727,10 @@ Answer:`;
       answer: answer
     }));
 
-    // Generate and send audio
+    // Generate and send audio with language support
     try {
-      const audioBuffer = await ttsService.textToSpeech(answer);
+      const targetLang = getLanguageName(language);
+      const audioBuffer = await ttsService.textToSpeech(answer, null, 'male', targetLang);
 
       participant.ws.send(JSON.stringify({
         type: 'agent_audio',

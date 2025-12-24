@@ -1,6 +1,7 @@
 import express from 'express';
 import historyService from '../services/history.service.js';
 import aiService from '../services/ai.service.js';
+import ttsService from '../services/tts.service.js';
 
 const router = express.Router();
 
@@ -199,9 +200,9 @@ router.get('/stats', async (req, res) => {
  */
 router.post('/qa', async (req, res) => {
   try {
-    const { userId, question, sessionId, targetLanguage = 'English' } = req.body;
+    const { userId, question, sessionId, targetLanguage = 'English', includeAudio = false } = req.body;
 
-    console.log('📥 POST /api/history/qa - Received:', { userId, question, sessionId, targetLanguage });
+    console.log('📥 POST /api/history/qa - Received:', { userId, question, sessionId, targetLanguage, includeAudio });
 
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
@@ -235,12 +236,26 @@ router.post('/qa', async (req, res) => {
     historyService.saveQA(sessionId || null, userId, question, answer, contextType);
     console.log(`✅ Saved Q&A for session: ${sessionId || 'null'}`);
 
+    // Generate audio if requested
+    let audioBase64 = null;
+    if (includeAudio) {
+      try {
+        const audioBuffer = await ttsService.textToSpeech(answer, null, 'male', targetLanguage);
+        audioBase64 = audioBuffer.toString('base64');
+        console.log(`✅ Generated TTS audio for answer (${audioBuffer.length} bytes)`);
+      } catch (audioError) {
+        console.error('❌ TTS generation error:', audioError);
+        // Continue without audio if TTS fails
+      }
+    }
+
     res.json({
       success: true,
       question,
       answer,
       contextType,
-      sessionId: sessionId || null
+      sessionId: sessionId || null,
+      audio: audioBase64
     });
   } catch (error) {
     console.error('Error answering question:', error);

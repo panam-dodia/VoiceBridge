@@ -7,6 +7,54 @@ import historyService from '../services/history.service.js';
 const router = express.Router();
 
 /**
+ * POST /api/youtube/create-session
+ * Create a YouTube session without fetching transcript (client-side handles that)
+ */
+router.post('/create-session', async (req, res) => {
+  try {
+    const { url, userId } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'YouTube URL is required' });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Extract video ID
+    const videoId = youtubeService.extractVideoId(url);
+
+    // Get video metadata (title, author, etc.)
+    const metadata = await youtubeService.getVideoMetadata(videoId);
+    console.log(`📺 Video metadata:`, metadata);
+
+    // Create session in database with actual video title
+    const title = metadata.title || `YouTube Video: ${videoId}`;
+    const sessionId = historyService.createSession(
+      userId,
+      'youtube',
+      { videoId, url, title: metadata.title, author: metadata.author },
+      title,
+      'English'
+    );
+
+    res.json({
+      success: true,
+      videoId,
+      sessionId,
+      metadata
+    });
+  } catch (error) {
+    console.error('Error creating session:', error);
+    res.status(500).json({
+      error: 'Failed to create session',
+      message: error.message
+    });
+  }
+});
+
+/**
  * GET /api/youtube/transcript
  * Extract transcript from YouTube video
  */
@@ -121,14 +169,14 @@ router.post('/translate-text', async (req, res) => {
  */
 router.post('/text-to-speech', async (req, res) => {
   try {
-    const { text, gender = 'male' } = req.body;
+    const { text, gender = 'male', language = 'English' } = req.body;
 
     if (!text) {
       return res.status(400).json({ error: 'Text is required' });
     }
 
-    // Convert to speech
-    const audioBuffer = await ttsService.textToSpeech(text, null, gender);
+    // Convert to speech with language support
+    const audioBuffer = await ttsService.textToSpeech(text, null, gender, language);
 
     // Set headers for audio response
     res.set({

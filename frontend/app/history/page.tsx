@@ -97,6 +97,10 @@ export default function HistoryPage() {
         const transcript = event.results[0][0].transcript;
         console.log('📝 Recognized text:', transcript);
         setQaQuestion(transcript);
+        // Automatically ask the question with audio response when using voice
+        // Call internal function directly with transcript to avoid state delay
+        console.log('🔊 Auto-requesting with audio for voice input');
+        setTimeout(() => askQuestionInternal(transcript, true), 100);
       };
 
       recognitionRef.current.onend = () => {
@@ -142,16 +146,17 @@ export default function HistoryPage() {
     }
   };
 
-  // Ask Q&A across all history
-  const handleAskQuestion = async () => {
-    if (!qaQuestion.trim()) {
+  // Ask Q&A across all history - internal function that takes question text
+  const askQuestionInternal = async (questionText: string, requestAudio = false) => {
+    if (!questionText.trim()) {
       console.log('⚠️ Question is empty, not sending request');
       return;
     }
 
     console.log('🎯 Starting Q&A request...');
-    console.log('📝 Question:', qaQuestion);
+    console.log('📝 Question:', questionText);
     console.log('👤 User ID:', userId);
+    console.log('🔊 Include audio:', requestAudio);
 
     setQaLoading(true);
     setQaAnswer(null);
@@ -163,8 +168,9 @@ export default function HistoryPage() {
 
       const requestBody = {
         userId,
-        question: qaQuestion,
-        targetLanguage: 'English'
+        question: questionText,
+        targetLanguage: 'English',
+        includeAudio: requestAudio
       };
       console.log('📦 Request body:', JSON.stringify(requestBody, null, 2));
 
@@ -184,11 +190,48 @@ export default function HistoryPage() {
         console.log('✅ Success! Answer:', data.answer);
         setQaAnswer(data.answer);
 
-        // Play audio response
-        if (data.audioUrl) {
-          const audio = new Audio(`${API_URL}${data.audioUrl}`);
-          audioRef.current = audio;
-          audio.play();
+        // Play audio response if available
+        if (data.audio) {
+          console.log('🔊 Audio data received, length:', data.audio.length);
+          try {
+            console.log('🔊 Creating audio blob...');
+            const audioBlob = new Blob(
+              [Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))],
+              { type: 'audio/mpeg' }
+            );
+            console.log('🔊 Blob created, size:', audioBlob.size, 'bytes');
+
+            const audioUrl = URL.createObjectURL(audioBlob);
+            console.log('🔊 Audio URL created:', audioUrl);
+
+            const audio = new Audio(audioUrl);
+            audioRef.current = audio;
+
+            audio.onended = () => {
+              console.log('🔊 Audio playback ended');
+              URL.revokeObjectURL(audioUrl);
+            };
+
+            audio.onerror = (e) => {
+              console.error('🔊 Audio playback error:', e);
+              console.error('🔊 Audio error details:', audio.error);
+            };
+
+            audio.oncanplay = () => {
+              console.log('🔊 Audio can play, duration:', audio.duration);
+            };
+
+            console.log('🔊 Starting audio playback...');
+            audio.play().then(() => {
+              console.log('✅ Audio playback started successfully');
+            }).catch((err) => {
+              console.error('❌ Audio play() failed:', err);
+            });
+          } catch (audioError) {
+            console.error('❌ Error creating/playing audio:', audioError);
+          }
+        } else {
+          console.log('⚠️ No audio data in response');
         }
       } else {
         console.error('❌ API returned error:', data.error);
@@ -204,6 +247,11 @@ export default function HistoryPage() {
       console.log('🏁 Request complete, setting loading to false');
       setQaLoading(false);
     }
+  };
+
+  // Wrapper function that uses current state
+  const handleAskQuestion = async (requestAudio = false) => {
+    return askQuestionInternal(qaQuestion, requestAudio);
   };
 
   const startVoiceRecording = () => {
@@ -225,7 +273,9 @@ export default function HistoryPage() {
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return 'Date unavailable';
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid date';
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -233,6 +283,19 @@ export default function HistoryPage() {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const getSessionTitle = (session: Session) => {
+    if (session.title && session.title !== 'Untitled' && session.title.trim() !== '') {
+      return session.title;
+    }
+    // Provide fallback titles for sessions without proper titles
+    if (session.type === 'meeting') {
+      return `Meeting Session`;
+    } else if (session.type === 'youtube') {
+      return `YouTube Video`;
+    }
+    return 'Session';
   };
 
   const groupSessionsByDate = (sessions: Session[]) => {
@@ -303,7 +366,7 @@ export default function HistoryPage() {
                 type="text"
                 value={qaQuestion}
                 onChange={(e) => setQaQuestion(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && !qaLoading && handleAskQuestion()}
+                onKeyDown={(e) => e.key === 'Enter' && !qaLoading && handleAskQuestion(false)}
                 placeholder="Type your question or use voice..."
                 className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
                 disabled={qaLoading || isListening}
@@ -320,7 +383,7 @@ export default function HistoryPage() {
                 {isListening ? '🔴 Listening...' : '🎤'}
               </button>
               <button
-                onClick={handleAskQuestion}
+                onClick={() => handleAskQuestion(false)}
                 disabled={qaLoading || !qaQuestion.trim()}
                 className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 transition-all"
               >
@@ -457,7 +520,7 @@ export default function HistoryPage() {
                             </span>
                             <span className="text-sm text-gray-400">{session.language}</span>
                           </div>
-                          <h3 className="text-white font-medium mb-1">{session.title}</h3>
+                          <h3 className="text-white font-medium mb-1">{getSessionTitle(session)}</h3>
                           <p className="text-sm text-gray-400">
                             {formatDate(session.created_at)}
                           </p>

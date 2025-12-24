@@ -11,6 +11,12 @@ export const api = axios.create({
 
 // YouTube API
 export const youtubeAPI = {
+  // Create a YouTube session without fetching transcript (client-side handles that)
+  createSession: async (url: string, userId: string) => {
+    const response = await api.post('/api/youtube/create-session', { url, userId });
+    return response.data;
+  },
+
   getTranscript: async (url: string, userId: string) => {
     const response = await api.post('/api/youtube/transcript', { url, userId });
     return response.data;
@@ -25,9 +31,9 @@ export const youtubeAPI = {
     return response.data;
   },
 
-  textToSpeech: async (text: string, gender: string = 'male') => {
+  textToSpeech: async (text: string, gender: string = 'male', language: string = 'English') => {
     const response = await api.post('/api/youtube/text-to-speech',
-      { text, gender },
+      { text, gender, language },
       { responseType: 'arraybuffer' }
     );
     return response.data;

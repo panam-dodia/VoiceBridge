@@ -133,18 +133,27 @@ ${text}`;
 
   /**
    * Detect voice gender from transcript sample
+   * Note: This is a best-effort detection based on text content only.
+   * It looks for explicit gender references or pronouns.
+   * Default is 'male' when uncertain.
    */
   async detectVoiceGender(transcriptSample) {
     try {
-      const prompt = `Analyze this video transcript sample and determine if the speaker is most likely male or female.
+      const prompt = `Analyze this video transcript and determine the speaker's gender ONLY if there are EXPLICIT indicators.
 
 Transcript sample:
 ${transcriptSample}
 
-Based on:
-1. Language patterns (if any gender-specific references exist)
-2. Context clues (topics, self-references, etc.)
-3. Any explicit mentions of gender
+Look for EXPLICIT indicators ONLY:
+1. Direct self-references: "I am a man/woman", "as a male/female", etc.
+2. Clear pronoun usage: "he/him" or "she/her" when referring to the speaker
+3. Gendered titles: Mr., Mrs., Ms., Sir, Madam, etc.
+
+IMPORTANT:
+- If there are NO explicit gender indicators, respond with "male" (default)
+- Do NOT guess based on topic, interests, or speech patterns
+- Do NOT infer from ambiguous content
+- ONLY detect gender if it's explicitly stated
 
 Respond with ONLY ONE WORD: either "male" or "female"
 
@@ -154,15 +163,18 @@ Answer:`;
       const response = await result.response;
       const gender = response.text().trim().toLowerCase();
 
+      console.log(`🔍 Gender detection AI response: "${gender}"`);
+
       if (gender.includes('female')) {
+        console.log('✓ Detected as FEMALE (explicit indicators found)');
         return 'female';
-      } else if (gender.includes('male')) {
-        return 'male';
       } else {
-        return 'male'; // Default
+        console.log('✓ Defaulting to MALE (no explicit female indicators)');
+        return 'male';
       }
     } catch (error) {
       console.error('Voice gender detection error:', error.message);
+      console.log('⚠️ Error in detection, defaulting to MALE');
       return 'male'; // Default fallback
     }
   }

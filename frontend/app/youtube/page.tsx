@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { youtubeAPI } from '@/lib/api';
 import { getUserId } from '@/lib/userStore';
+import { fetchYouTubeTranscript } from '@/lib/youtube-transcript';
 
 declare global {
   interface Window {
@@ -170,24 +171,31 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      const response = await youtubeAPI.getTranscript(url, userId);
+      console.log('🌐 Fetching transcript client-side to bypass IP blocking...');
+
+      // Fetch transcript client-side (bypasses Cloud Run IP blocking)
+      const transcriptData = await fetchYouTubeTranscript(extractedId);
+
+      // Create session on backend for Q&A and history tracking
+      const response = await youtubeAPI.createSession(url, userId);
+
       setVideoId(extractedId);
       setSessionId(response.sessionId);
-      setTranscript(response.transcript);
+      setTranscript(transcriptData);
 
       // Detect gender FIRST and wait for it to complete
       let detectedGender: 'male' | 'female' = 'male';
-      if (response.transcript.length > 0) {
-        detectedGender = await detectGender(response.transcript);
+      if (transcriptData.length > 0) {
+        detectedGender = await detectGender(transcriptData);
       }
 
       // Load YouTube Player
       loadYouTubeAPI(extractedId);
 
       // Start preloading translations and audio with the detected gender
-      await initialPreload(response.transcript, targetLanguage, detectedGender);
+      await initialPreload(transcriptData, targetLanguage, detectedGender);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load transcript');
+      setError(err.message || 'Failed to load transcript');
       console.error('Error loading transcript:', err);
     } finally {
       setLoading(false);
@@ -300,8 +308,8 @@ export default function YouTubePage() {
         const originalText = transcriptData[i].text;
         const translatedText = await translateText(originalText, i, language);
 
-        // Generate audio with the detected gender
-        const audioData = await youtubeAPI.textToSpeech(translatedText, gender);
+        // Generate audio with the detected gender and target language
+        const audioData = await youtubeAPI.textToSpeech(translatedText, gender, language);
         const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
         const audioUrl = URL.createObjectURL(audioBlob);
         audioCache.current.set(i, audioUrl);
@@ -375,7 +383,7 @@ export default function YouTubePage() {
       const originalText = transcript[index].text;
       const translatedText = await translateText(originalText, index, targetLanguage);
 
-      const audioData = await youtubeAPI.textToSpeech(translatedText, voiceGender);
+      const audioData = await youtubeAPI.textToSpeech(translatedText, voiceGender, targetLanguage);
       const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
       audioUrl = URL.createObjectURL(audioBlob);
       audioCache.current.set(index, audioUrl);
@@ -543,7 +551,7 @@ export default function YouTubePage() {
   const speakAnswer = async (text: string) => {
     try {
       setIsSpeakingAnswer(true);
-      const audioData = await youtubeAPI.textToSpeech(text, voiceGender);
+      const audioData = await youtubeAPI.textToSpeech(text, voiceGender, targetLanguage);
       const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
       const audioUrl = URL.createObjectURL(audioBlob);
 
@@ -682,7 +690,7 @@ export default function YouTubePage() {
                 className="aspect-video w-full"
               ></div>
 
-              {/* Auto-play toggle */}
+              {/* Auto-play toggle and Voice Gender */}
               <div className="mt-4 flex items-center justify-between">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -693,7 +701,23 @@ export default function YouTubePage() {
                   />
                   <span className="text-white text-sm">Auto-play translations</span>
                 </label>
-                <span className="text-sm text-gray-400">Voice: {voiceGender}</span>
+                <button
+                  onClick={() => {
+                    const newGender = voiceGender === 'male' ? 'female' : 'male';
+                    console.log(`🔄 User manually switched voice from ${voiceGender} to ${newGender}`);
+                    setVoiceGender(newGender);
+                    // Clear audio cache to force regeneration with new voice
+                    audioCache.current.forEach((url) => URL.revokeObjectURL(url));
+                    audioCache.current.clear();
+                    console.log('🗑️ Audio cache cleared - will regenerate with new voice');
+                  }}
+                  className="px-3 py-1.5 bg-black/30 hover:bg-black/50 border border-white/10 rounded-lg text-sm text-white transition-all flex items-center gap-2"
+                  title="Click to switch voice gender"
+                >
+                  <span className="text-gray-400">Voice:</span>
+                  <span className="font-medium capitalize">{voiceGender}</span>
+                  <span className="text-gray-500">↻</span>
+                </button>
               </div>
             </div>
 

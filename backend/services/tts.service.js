@@ -76,10 +76,12 @@ class TTSService {
    */
   async textToSpeech(text, voiceId = null, gender = 'male', language = 'English') {
     try {
+      console.log(`🎙️ TTS Request - Gender: ${gender}, Language: ${language}`);
+
       // Select voice based on gender and language if not provided
       if (!voiceId) {
         voiceId = this.getVoiceId(gender, language);
-        console.log(`🎙️ Using ${gender} voice for ${language}: ${voiceId}`);
+        console.log(`🎙️ Selected voice ID: ${voiceId} (${gender} voice for ${language})`);
       }
 
       // Select appropriate model
