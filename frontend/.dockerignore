@@ -2,11 +2,12 @@ node_modules
 npm-debug.log
 .env
 .env.local
+.env*.local
 .git
 .gitignore
 *.md
-.vscode
 .DS_Store
-gcp-credentials.json
-*.db
+.next
+out
+build
 *.log
