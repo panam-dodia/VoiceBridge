@@ -13,6 +13,10 @@ RUN npm install
 # Copy application files
 COPY . .
 
+# Set environment variables for build
+ENV NEXT_PUBLIC_API_URL=https://voicebridge-149462569558.us-central1.run.app
+ENV NEXT_PUBLIC_WS_URL=voicebridge-149462569558.us-central1.run.app
+
 # Build Next.js application
 RUN npm run build
 
