@@ -13,7 +13,7 @@ const router = express.Router();
  */
 router.post('/create-session', async (req, res) => {
   try {
-    const { url, userId } = req.body;
+    const { url, userId, transcript: clientTranscript } = req.body;
 
     if (!url) {
       return res.status(400).json({ error: 'YouTube URL is required' });
@@ -25,9 +25,6 @@ router.post('/create-session', async (req, res) => {
 
     // Extract video ID
     const videoId = youtubeService.extractVideoId(url);
-
-    // Fetch transcript using Innertube API (bypasses IP blocking)
-    const transcript = await youtubeInnertubeService.getTranscript(videoId);
 
     // Get video metadata (title, author, etc.)
     const metadata = await youtubeService.getVideoMetadata(videoId);
@@ -42,6 +39,16 @@ router.post('/create-session', async (req, res) => {
       title,
       'English'
     );
+
+    // Use client-provided transcript if available (for Cloud Run where IP is blocked)
+    // Otherwise fetch from server (for local development)
+    let transcript = clientTranscript;
+    if (!transcript || transcript.length === 0) {
+      console.log('📥 No client transcript provided, fetching from server...');
+      transcript = await youtubeInnertubeService.getTranscript(videoId);
+    } else {
+      console.log(`✅ Using client-provided transcript (${transcript.length} segments)`);
+    }
 
     // Save transcript to database
     for (const segment of transcript) {

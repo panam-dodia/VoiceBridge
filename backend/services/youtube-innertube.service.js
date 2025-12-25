@@ -16,27 +16,33 @@ class YouTubeInnertubeService {
       console.log(`📥 Fetching transcript via Innertube API for video: ${videoId}`);
 
       // Step 1: Get initial player data
-      const playerResponse = await fetch(
-        `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          body: JSON.stringify({
-            context: {
-              client: {
-                clientName: 'WEB',
-                clientVersion: INNERTUBE_CLIENT_VERSION,
-                hl: 'en',
-                gl: 'US',
-              },
+      // For production (Cloud Run), we'll need to use client-side fetching instead
+      // because YouTube blocks all cloud provider IPs regardless of proxy
+      const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
+
+      const fetchOptions = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Origin': 'https://www.youtube.com',
+          'Referer': 'https://www.youtube.com/',
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: 'WEB',
+              clientVersion: INNERTUBE_CLIENT_VERSION,
+              hl: 'en',
+              gl: 'US',
             },
-            videoId: videoId,
-          }),
-        }
-      );
+          },
+          videoId: videoId,
+        }),
+      };
+
+      const playerResponse = await fetch(targetUrl, fetchOptions);
 
       if (!playerResponse.ok) {
         throw new Error(`Failed to fetch player data: ${playerResponse.status}`);

@@ -176,15 +176,21 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      console.log('🎯 Fetching transcript via Innertube API from backend...');
+      console.log('🎯 Fetching transcript via Innertube API (client-side)...');
 
-      // Create session and fetch transcript from backend (uses Innertube API)
-      const response = await youtubeAPI.createSession(url, userId);
+      // Fetch transcript client-side to avoid IP blocking on Cloud Run
+      const { fetchYouTubeTranscriptInnertube } = await import('@/lib/youtube-innertube');
+      const clientTranscript = await fetchYouTubeTranscriptInnertube(extractedId);
+
+      console.log(`✅ Fetched ${clientTranscript.length} transcript segments client-side`);
+
+      // Create session and send transcript to backend
+      const response = await youtubeAPI.createSession(url, userId, clientTranscript);
 
       console.log('Backend response:', response);
 
       if (!response.transcript || response.transcript.length === 0) {
-        throw new Error('No transcript returned from backend');
+        throw new Error('No transcript returned');
       }
 
       setVideoId(extractedId);

@@ -11,9 +11,9 @@ export const api = axios.create({
 
 // YouTube API
 export const youtubeAPI = {
-  // Create a YouTube session without fetching transcript (client-side handles that)
-  createSession: async (url: string, userId: string) => {
-    const response = await api.post('/api/youtube/create-session', { url, userId });
+  // Create a YouTube session - can optionally provide client-fetched transcript
+  createSession: async (url: string, userId: string, transcript?: any[]) => {
+    const response = await api.post('/api/youtube/create-session', { url, userId, transcript });
     return response.data;
   },
 
