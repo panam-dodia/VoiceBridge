@@ -6,7 +6,7 @@ dotenv.config();
 class VertexAIService {
   constructor() {
     // Initialize Vertex AI with your Google Cloud project
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
     const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 
     if (!projectId || projectId === 'your-project-id') {
