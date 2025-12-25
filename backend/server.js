@@ -18,7 +18,8 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   process.env.FRONTEND_URL,
-  /https:\/\/.*\.vercel\.app$/  // Allow all Vercel preview and production URLs
+  /https:\/\/.*\.vercel\.app$/,  // Allow all Vercel preview and production URLs
+  /https:\/\/.*\.run\.app$/      // Allow all Cloud Run URLs
 ].filter(Boolean);
 
 app.use(cors({

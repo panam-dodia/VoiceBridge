@@ -1,0 +1,26 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: talkbridge-backend
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/sessionAffinity: true
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+      - image: IMAGE_URL  # Will be replaced by Cloud Build
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: USE_VERTEX_AI
+          value: "true"

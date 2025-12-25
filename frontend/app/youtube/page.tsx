@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { youtubeAPI } from '@/lib/api';
 import { getUserId } from '@/lib/userStore';
-import { fetchYouTubeTranscript } from '@/lib/youtube-transcript';
+import { fetchYouTubeTranscriptInnertube } from '@/lib/youtube-innertube';
 
 declare global {
   interface Window {
@@ -35,7 +35,7 @@ interface ChatMessage {
 export default function YouTubePage() {
   const [url, setUrl] = useState('');
   const [videoId, setVideoId] = useState<string | null>(null);
-  const [targetLanguage, setTargetLanguage] = useState('Hindi');
+  const [targetLanguage, setTargetLanguage] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript[]>([]);
@@ -161,6 +161,11 @@ export default function YouTubePage() {
       return;
     }
 
+    if (!targetLanguage) {
+      setError('Please select a target language');
+      return;
+    }
+
     const extractedId = extractVideoId(url);
     if (!extractedId) {
       setError('Invalid YouTube URL');
@@ -171,29 +176,33 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      console.log('🌐 Fetching transcript client-side to bypass IP blocking...');
+      console.log('🎯 Fetching transcript via Innertube API from backend...');
 
-      // Fetch transcript client-side (bypasses Cloud Run IP blocking)
-      const transcriptData = await fetchYouTubeTranscript(extractedId);
-
-      // Create session on backend for Q&A and history tracking
+      // Create session and fetch transcript from backend (uses Innertube API)
       const response = await youtubeAPI.createSession(url, userId);
+
+      console.log('Backend response:', response);
+
+      if (!response.transcript || response.transcript.length === 0) {
+        throw new Error('No transcript returned from backend');
+      }
 
       setVideoId(extractedId);
       setSessionId(response.sessionId);
-      setTranscript(transcriptData);
+      setTranscript(response.transcript);
 
       // Detect gender FIRST and wait for it to complete
       let detectedGender: 'male' | 'female' = 'male';
-      if (transcriptData.length > 0) {
-        detectedGender = await detectGender(transcriptData);
+      if (response.transcript.length > 0) {
+        detectedGender = await detectGender(response.transcript);
       }
 
       // Load YouTube Player
       loadYouTubeAPI(extractedId);
 
       // Start preloading translations and audio with the detected gender
-      await initialPreload(transcriptData, targetLanguage, detectedGender);
+      await initialPreload(response.transcript, targetLanguage, detectedGender);
+
     } catch (err: any) {
       setError(err.message || 'Failed to load transcript');
       console.error('Error loading transcript:', err);
@@ -299,7 +308,7 @@ export default function YouTubePage() {
   const initialPreload = async (transcriptData: Transcript[], language: string, gender: 'male' | 'female') => {
     setIsPreloading(true);
     setPreloadProgress(0);
-    setPreloadMessage('Preloading translations and audio...');
+    setPreloadMessage('Preparing your experience...');
 
     const segmentsToPreload = Math.min(10, transcriptData.length);
 
@@ -632,6 +641,7 @@ export default function YouTubePage() {
                   className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-purple-500 transition-colors"
                   disabled={loading}
                 >
+                  <option value="">Select your language</option>
                   {LANGUAGES.map(lang => (
                     <option key={lang} value={lang}>{lang}</option>
                   ))}

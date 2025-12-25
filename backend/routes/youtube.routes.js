@@ -1,5 +1,6 @@
 import express from 'express';
 import youtubeService from '../services/youtube.service.js';
+import youtubeInnertubeService from '../services/youtube-innertube.service.js';
 import aiService from '../services/ai.service.js';
 import ttsService from '../services/tts.service.js';
 import historyService from '../services/history.service.js';
@@ -8,7 +9,7 @@ const router = express.Router();
 
 /**
  * POST /api/youtube/create-session
- * Create a YouTube session without fetching transcript (client-side handles that)
+ * Create session and fetch transcript using Innertube API
  */
 router.post('/create-session', async (req, res) => {
   try {
@@ -25,6 +26,9 @@ router.post('/create-session', async (req, res) => {
     // Extract video ID
     const videoId = youtubeService.extractVideoId(url);
 
+    // Fetch transcript using Innertube API (bypasses IP blocking)
+    const transcript = await youtubeInnertubeService.getTranscript(videoId);
+
     // Get video metadata (title, author, etc.)
     const metadata = await youtubeService.getVideoMetadata(videoId);
     console.log(`📺 Video metadata:`, metadata);
@@ -39,11 +43,25 @@ router.post('/create-session', async (req, res) => {
       'English'
     );
 
+    // Save transcript to database
+    for (const segment of transcript) {
+      historyService.addTranscript(
+        sessionId,
+        segment.text,
+        'English',
+        null,
+        null,
+        null,
+        null
+      );
+    }
+
     res.json({
       success: true,
       videoId,
       sessionId,
-      metadata
+      metadata,
+      transcript
     });
   } catch (error) {
     console.error('Error creating session:', error);

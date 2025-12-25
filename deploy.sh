@@ -59,8 +59,10 @@ gcloud run deploy talkbridge-backend \
     --memory 1Gi \
     --cpu 1 \
     --timeout 300 \
-    --min-instances 0 \
+    --min-instances 1 \
     --max-instances 10 \
+    --session-affinity \
+    --execution-environment gen2 \
     --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,USE_VERTEX_AI=true,NODE_ENV=production \
     --update-secrets ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest \
     --quiet
