@@ -804,7 +804,8 @@ export default function MeetingPage() {
         targetLanguage: getLanguageName(language)
       });
 
-      const response = await axios.post('http://localhost:8080/api/history/qa', {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const response = await axios.post(`${API_URL}/api/history/qa`, {
         userId: 'meeting-user',
         question: finalQuestion,
         sessionId: sessionId,
@@ -841,7 +842,8 @@ export default function MeetingPage() {
     try {
       setIsSpeakingAnswer(true);
 
-      const response = await axios.post('http://localhost:8080/api/youtube/text-to-speech',
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const response = await axios.post(`${API_URL}/api/youtube/text-to-speech`,
         { text, gender: 'male' },
         { responseType: 'arraybuffer' }
       );
