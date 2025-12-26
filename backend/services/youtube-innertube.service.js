@@ -4,7 +4,7 @@
  * Routes requests through WARP proxy to bypass IP blocking
  */
 
-const { SocksProxyAgent } = require('socks-proxy-agent');
+import { SocksProxyAgent } from 'socks-proxy-agent';
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
 const INNERTUBE_CLIENT_VERSION = '2.20250110.01.00';
