@@ -109,12 +109,72 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
     }
 
     console.log(`✅ Successfully fetched ${transcript.length} transcript segments via Innertube`);
-    return transcript;
+
+    // Step 6: Merge segments into complete sentences
+    const mergedTranscript = mergeIntoSentences(transcript);
+    console.log(`📝 Merged into ${mergedTranscript.length} sentences`);
+
+    return mergedTranscript;
 
   } catch (error: any) {
     console.error('❌ Innertube API error:', error);
     throw new Error(error.message || 'Failed to fetch transcript via Innertube');
   }
+}
+
+/**
+ * Merge transcript segments into complete sentences
+ * This improves translation quality by providing full context
+ */
+function mergeIntoSentences(segments: TranscriptSegment[]): TranscriptSegment[] {
+  if (!segments || segments.length === 0) return [];
+
+  const sentences: TranscriptSegment[] = [];
+  let currentSentence = {
+    text: '',
+    start: segments[0].start,
+    duration: 0
+  };
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+
+    // Add segment text to current sentence
+    if (currentSentence.text) {
+      currentSentence.text += ' ' + segment.text;
+    } else {
+      currentSentence.text = segment.text;
+      currentSentence.start = segment.start;
+    }
+
+    // Check if this segment ends a sentence
+    const endsWithPunctuation = /[.!?]$/.test(segment.text.trim());
+    const isLastSegment = i === segments.length - 1;
+
+    // Also check if next segment starts with capital letter (new sentence)
+    const nextStartsCapital = i < segments.length - 1 &&
+      /^[A-Z]/.test(segments[i + 1].text.trim());
+
+    if (endsWithPunctuation || isLastSegment || nextStartsCapital) {
+      // Calculate total duration from start to end of current segment
+      currentSentence.duration = (segment.start + segment.duration) - currentSentence.start;
+
+      sentences.push({
+        text: currentSentence.text.trim(),
+        start: currentSentence.start,
+        duration: currentSentence.duration
+      });
+
+      // Reset for next sentence
+      currentSentence = {
+        text: '',
+        start: i < segments.length - 1 ? segments[i + 1].start : segment.start,
+        duration: 0
+      };
+    }
+  }
+
+  return sentences;
 }
 
 /**
