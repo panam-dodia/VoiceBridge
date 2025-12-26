@@ -58,10 +58,24 @@ class YouTubeInnertubeService {
 
       const playerData = await playerResponse.json();
 
+      // Log response for debugging
+      console.log('Player response keys:', Object.keys(playerData));
+      if (playerData.playabilityStatus) {
+        console.log('Playability status:', playerData.playabilityStatus.status);
+        if (playerData.playabilityStatus.reason) {
+          console.log('Playability reason:', playerData.playabilityStatus.reason);
+        }
+      }
+
       // Step 2: Extract caption tracks
       const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
       if (!captions || captions.length === 0) {
+        console.log('Captions path check:', {
+          hasCaptions: !!playerData.captions,
+          hasRenderer: !!playerData.captions?.playerCaptionsTracklistRenderer,
+          hasTracks: !!playerData.captions?.playerCaptionsTracklistRenderer?.captionTracks
+        });
         throw new Error('No captions available for this video');
       }
 
