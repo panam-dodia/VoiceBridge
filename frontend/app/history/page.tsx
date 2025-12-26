@@ -75,10 +75,31 @@ export default function HistoryPage() {
   const [qaAnswer, setQaAnswer] = useState<string | null>(null);
   const [qaLoading, setQaLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('en-US'); // Added language state
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const userId = getUserId();
+
+  // Language options
+  const LANGUAGES = [
+    { code: 'en-US', name: 'English' },
+    { code: 'es-ES', name: 'Spanish' },
+    { code: 'fr-FR', name: 'French' },
+    { code: 'de-DE', name: 'German' },
+    { code: 'it-IT', name: 'Italian' },
+    { code: 'pt-PT', name: 'Portuguese' },
+    { code: 'ru-RU', name: 'Russian' },
+    { code: 'ja-JP', name: 'Japanese' },
+    { code: 'ko-KR', name: 'Korean' },
+    { code: 'zh-CN', name: 'Chinese' },
+    { code: 'hi-IN', name: 'Hindi' },
+  ];
+
+  const getLanguageName = (code: string) => {
+    const lang = LANGUAGES.find(l => l.code === code);
+    return lang ? lang.name : 'English';
+  };
 
   useEffect(() => {
     loadSessions();
@@ -91,7 +112,7 @@ export default function HistoryPage() {
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
+      recognitionRef.current.lang = selectedLanguage;
 
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
@@ -119,7 +140,7 @@ export default function HistoryPage() {
         recognitionRef.current.stop();
       }
     };
-  }, []);
+  }, [selectedLanguage]);
 
   const loadSessions = async () => {
     setLoading(true);
@@ -169,7 +190,7 @@ export default function HistoryPage() {
       const requestBody = {
         userId,
         question: questionText,
-        targetLanguage: 'English',
+        targetLanguage: getLanguageName(selectedLanguage),
         includeAudio: requestAudio
       };
       console.log('📦 Request body:', JSON.stringify(requestBody, null, 2));
@@ -361,6 +382,22 @@ export default function HistoryPage() {
           </p>
 
           <div className="space-y-3">
+            {/* Language Selector */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-300">Response Language:</label>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-purple-500 transition-colors"
+              >
+                {LANGUAGES.map(lang => (
+                  <option key={lang.code} value={lang.code} className="bg-gray-900">
+                    {lang.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex gap-2">
               <input
                 type="text"

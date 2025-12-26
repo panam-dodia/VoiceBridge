@@ -1,11 +1,14 @@
 /**
  * YouTube Innertube API Service
  * Uses YouTube's internal API to fetch transcripts
- * This works from the server and should bypass IP blocking
+ * Routes requests through WARP proxy to bypass IP blocking
  */
+
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
 const INNERTUBE_CLIENT_VERSION = '2.20250110.01.00';
+const WARP_PROXY_URL = process.env.WARP_PROXY_URL || 'socks5://34.46.173.108:1080';
 
 class YouTubeInnertubeService {
   /**
@@ -19,6 +22,9 @@ class YouTubeInnertubeService {
       // For production (Cloud Run), we'll need to use client-side fetching instead
       // because YouTube blocks all cloud provider IPs regardless of proxy
       const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
+
+      // Create SOCKS proxy agent
+      const agent = new SocksProxyAgent(WARP_PROXY_URL);
 
       const fetchOptions = {
         method: 'POST',
@@ -40,8 +46,10 @@ class YouTubeInnertubeService {
           },
           videoId: videoId,
         }),
+        agent: agent, // Use WARP proxy
       };
 
+      console.log(`🌐 Using WARP proxy: ${WARP_PROXY_URL}`);
       const playerResponse = await fetch(targetUrl, fetchOptions);
 
       if (!playerResponse.ok) {
@@ -71,8 +79,8 @@ class YouTubeInnertubeService {
       const captionUrl = selectedTrack.baseUrl;
       console.log(`Selected caption track: ${selectedTrack.languageCode}`);
 
-      // Step 3: Fetch the actual transcript
-      const transcriptResponse = await fetch(captionUrl);
+      // Step 3: Fetch the actual transcript (through WARP proxy)
+      const transcriptResponse = await fetch(captionUrl, { agent: agent });
 
       if (!transcriptResponse.ok) {
         throw new Error('Failed to fetch transcript');
