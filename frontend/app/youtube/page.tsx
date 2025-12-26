@@ -175,10 +175,15 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      console.log('🎯 Fetching transcript via backend (with WARP proxy)...');
+      console.log('🎯 Fetching transcript via client-side (browser)...');
 
-      // Let backend fetch transcript through WARP proxy (no client-side fetching)
-      const response = await youtubeAPI.createSession(url, userId);
+      // Fetch transcript client-side (browser) to bypass cloud IP blocking
+      const { fetchYouTubeTranscriptInnertube } = await import('@/lib/youtube-innertube');
+      const clientTranscript = await fetchYouTubeTranscriptInnertube(extractedId);
+      console.log(`✅ Fetched ${clientTranscript.length} transcript segments client-side`);
+
+      // Send transcript to backend for processing
+      const response = await youtubeAPI.createSession(url, userId, clientTranscript);
 
       console.log('Backend response:', response);
 
