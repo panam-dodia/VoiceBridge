@@ -27,6 +27,12 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
 
+    // In production, allow all origins (for now - can restrict later)
+    if (process.env.NODE_ENV === 'production') {
+      console.log('✅ CORS allowed in production for origin:', origin);
+      return callback(null, true);
+    }
+
     // Check if origin is in allowed list or matches regex pattern
     const isAllowed = allowedOrigins.some(allowed => {
       if (allowed instanceof RegExp) {
