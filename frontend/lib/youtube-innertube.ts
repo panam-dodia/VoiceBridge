@@ -12,6 +12,7 @@ export interface TranscriptSegment {
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
 const INNERTUBE_CLIENT_VERSION = '2.20250110.01.00';
+const CORS_PROXY = 'https://corsproxy.io/?'; // CORS proxy to bypass browser restrictions
 
 /**
  * Fetch YouTube transcript using Innertube API
@@ -20,9 +21,10 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
   try {
     console.log(`📥 Fetching transcript via Innertube API for video: ${videoId}`);
 
-    // Step 1: Get initial player data
+    // Step 1: Get initial player data (use CORS proxy for browser)
+    const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
     const playerResponse = await fetch(
-      `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`,
+      `${CORS_PROXY}${encodeURIComponent(targetUrl)}`,
       {
         method: 'POST',
         headers: {
@@ -69,8 +71,8 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
     const captionUrl = selectedTrack.baseUrl;
     console.log(`Selected caption track: ${selectedTrack.languageCode}`);
 
-    // Step 3: Fetch the actual transcript
-    const transcriptResponse = await fetch(captionUrl);
+    // Step 3: Fetch the actual transcript (use CORS proxy for browser)
+    const transcriptResponse = await fetch(`${CORS_PROXY}${encodeURIComponent(captionUrl)}`);
 
     if (!transcriptResponse.ok) {
       throw new Error('Failed to fetch transcript');
