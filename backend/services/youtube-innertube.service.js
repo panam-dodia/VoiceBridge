@@ -26,25 +26,23 @@ class YouTubeInnertubeService {
       // Create SOCKS proxy agent
       const agent = new SocksProxyAgent(WARP_PROXY_URL);
 
-      // Use ANDROID client - it has less strict bot detection
+      // Use ANDROID_TESTSUITE client - bypasses bot detection
       const fetchOptions = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': `com.google.android.youtube/${ANDROID_CLIENT_VERSION} (Linux; U; Android 14) gzip`,
-          'X-Youtube-Client-Name': '3',
+          'X-Youtube-Client-Name': '30',  // ANDROID_TESTSUITE
           'X-Youtube-Client-Version': ANDROID_CLIENT_VERSION,
         },
         body: JSON.stringify({
           context: {
             client: {
-              clientName: 'ANDROID',
+              clientName: 'ANDROID_TESTSUITE',
               clientVersion: ANDROID_CLIENT_VERSION,
               hl: 'en',
               gl: 'US',
               androidSdkVersion: 34,
-              osName: 'Android',
-              osVersion: '14',
             },
           },
           videoId: videoId,
