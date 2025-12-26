@@ -7,7 +7,7 @@
 import { SocksProxyAgent } from 'socks-proxy-agent';
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
-const INNERTUBE_CLIENT_VERSION = '2.20250110.01.00';
+const ANDROID_CLIENT_VERSION = '19.51.37'; // Android client version
 const WARP_PROXY_URL = process.env.WARP_PROXY_URL || 'socks5://34.46.173.108:1080';
 
 class YouTubeInnertubeService {
@@ -26,22 +26,25 @@ class YouTubeInnertubeService {
       // Create SOCKS proxy agent
       const agent = new SocksProxyAgent(WARP_PROXY_URL);
 
+      // Use ANDROID client - it has less strict bot detection
       const fetchOptions = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Origin': 'https://www.youtube.com',
-          'Referer': 'https://www.youtube.com/',
+          'User-Agent': `com.google.android.youtube/${ANDROID_CLIENT_VERSION} (Linux; U; Android 14) gzip`,
+          'X-Youtube-Client-Name': '3',
+          'X-Youtube-Client-Version': ANDROID_CLIENT_VERSION,
         },
         body: JSON.stringify({
           context: {
             client: {
-              clientName: 'WEB',
-              clientVersion: INNERTUBE_CLIENT_VERSION,
+              clientName: 'ANDROID',
+              clientVersion: ANDROID_CLIENT_VERSION,
               hl: 'en',
               gl: 'US',
+              androidSdkVersion: 34,
+              osName: 'Android',
+              osVersion: '14',
             },
           },
           videoId: videoId,
