@@ -34,6 +34,7 @@ interface ChatMessage {
 export default function YouTubePage() {
   const [url, setUrl] = useState('');
   const [videoId, setVideoId] = useState<string | null>(null);
+  const [videoTitle, setVideoTitle] = useState<string>('');
   const [targetLanguage, setTargetLanguage] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -187,8 +188,13 @@ export default function YouTubePage() {
 
       console.log('Backend response:', response);
 
+      // Set video title from metadata
+      if (response.metadata && response.metadata.title) {
+        setVideoTitle(response.metadata.title);
+      }
+
       if (!response.transcript || response.transcript.length === 0) {
-        throw new Error('No transcript returned');
+        throw new Error('No transcript available for this video. Please try a different video with captions enabled.');
       }
 
       setVideoId(extractedId);
@@ -691,7 +697,12 @@ export default function YouTubePage() {
             {/* YouTube Player */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-white">Video</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Video</h2>
+                  {videoTitle && (
+                    <p className="text-sm text-gray-400 mt-1">{videoTitle}</p>
+                  )}
+                </div>
                 <button
                   onClick={openFloatingWindow}
                   className="px-3 py-1 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 transition-all"
