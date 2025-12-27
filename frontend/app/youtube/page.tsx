@@ -194,7 +194,7 @@ export default function YouTubePage() {
       }
 
       if (!response.transcript || response.transcript.length === 0) {
-        throw new Error('No transcript available for this video. Please try a different video with captions enabled.');
+        throw new Error('This video doesn\'t have captions. Please try a different video with CC enabled.');
       }
 
       setVideoId(extractedId);
@@ -639,6 +639,14 @@ export default function YouTubePage() {
                   className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
                   disabled={loading}
                 />
+                {url && (
+                  <div className="mt-2 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <p className="text-sm text-blue-300">
+                      📺 Tip: Use videos with captions (CC) for translation!<br />
+                      <span className="text-xs text-blue-400">(Speech-to-text APIs are expensive, and I'm a broke student 😅)</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
