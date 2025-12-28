@@ -11,117 +11,133 @@ export interface TranscriptSegment {
 }
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
-const INNERTUBE_CLIENT_VERSION = '2.20250110.01.00';
-const CORS_PROXY = 'https://corsproxy.io/?'; // CORS proxy to bypass browser restrictions
+const ANDROID_CLIENT_VERSION = '19.51.37';
+// Try multiple CORS proxies in case one is down
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://api.codetabs.com/v1/proxy?quest=',
+];
 
 /**
  * Fetch YouTube transcript using Innertube API
  */
 export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<TranscriptSegment[]> {
-  try {
-    console.log(`📥 Fetching transcript via Innertube API for video: ${videoId}`);
+  let lastError: Error | null = null;
 
-    // Step 1: Get initial player data (use CORS proxy for browser)
-    const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
-    const playerResponse = await fetch(
-      `${CORS_PROXY}${encodeURIComponent(targetUrl)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          context: {
-            client: {
-              clientName: 'WEB',
-              clientVersion: INNERTUBE_CLIENT_VERSION,
-              hl: 'en',
-              gl: 'US',
-            },
+  // Try each CORS proxy until one works
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    const corsProxy = CORS_PROXIES[i];
+    try {
+      console.log(`📥 Fetching transcript via Innertube API for video: ${videoId} (proxy ${i + 1}/${CORS_PROXIES.length})`);
+
+      // Step 1: Get initial player data (use CORS proxy for browser)
+      const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
+      const playerResponse = await fetch(
+        `${corsProxy}${encodeURIComponent(targetUrl)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-          videoId: videoId,
-        }),
+          body: JSON.stringify({
+            context: {
+              client: {
+                clientName: 'ANDROID',
+                clientVersion: ANDROID_CLIENT_VERSION,
+                hl: 'en',
+                gl: 'US',
+                androidSdkVersion: 34,
+              },
+            },
+            videoId: videoId,
+          }),
+        }
+      );
+
+      if (!playerResponse.ok) {
+        throw new Error(`Failed to fetch player data: ${playerResponse.status}`);
       }
-    );
 
-    if (!playerResponse.ok) {
-      throw new Error(`Failed to fetch player data: ${playerResponse.status}`);
+        const playerData = await playerResponse.json();
+
+      // Step 2: Extract caption tracks
+      const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+      if (!captions || captions.length === 0) {
+        throw new Error('No captions available for this video');
+      }
+
+      console.log(`Found ${captions.length} caption tracks`);
+
+      // Find English track or use first available
+      let selectedTrack = captions.find((track: any) =>
+        track.languageCode === 'en' || track.languageCode?.startsWith('en')
+      );
+
+      if (!selectedTrack) {
+        selectedTrack = captions[0];
+      }
+
+      const captionUrl = selectedTrack.baseUrl;
+      console.log(`Selected caption track: ${selectedTrack.languageCode}`);
+
+      // Step 3: Fetch the actual transcript (use same CORS proxy)
+      const transcriptResponse = await fetch(`${corsProxy}${encodeURIComponent(captionUrl)}`);
+
+      if (!transcriptResponse.ok) {
+        throw new Error('Failed to fetch transcript');
+      }
+
+      const transcriptXml = await transcriptResponse.text();
+
+      // Step 4: Parse XML
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(transcriptXml, 'text/xml');
+      const textElements = xmlDoc.getElementsByTagName('text');
+
+      if (textElements.length === 0) {
+        throw new Error('No transcript text found');
+      }
+
+      // Step 5: Convert to transcript segments
+      const transcript: TranscriptSegment[] = [];
+      for (let i = 0; i < textElements.length; i++) {
+        const element = textElements[i];
+        const text = element.textContent || '';
+        const start = parseFloat(element.getAttribute('start') || '0');
+        const duration = parseFloat(element.getAttribute('dur') || '0');
+
+        // Decode HTML entities
+        const decodedText = text
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&#x27;/g, "'")
+          .replace(/&apos;/g, "'");
+
+        transcript.push({ text: decodedText, start, duration });
+      }
+
+      console.log(`✅ Successfully fetched ${transcript.length} transcript segments via Innertube (proxy ${i + 1})`);
+
+      // Step 6: Merge segments into complete sentences
+      const mergedTranscript = mergeIntoSentences(transcript);
+      console.log(`📝 Merged into ${mergedTranscript.length} sentences`);
+
+      return mergedTranscript;
+
+    } catch (error: any) {
+      console.error(`❌ Proxy ${i + 1} failed:`, error.message);
+      lastError = error;
+      // Continue to next proxy
     }
-
-    const playerData = await playerResponse.json();
-
-    // Step 2: Extract caption tracks
-    const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-    if (!captions || captions.length === 0) {
-      throw new Error('No captions available for this video');
-    }
-
-    console.log(`Found ${captions.length} caption tracks`);
-
-    // Find English track or use first available
-    let selectedTrack = captions.find((track: any) =>
-      track.languageCode === 'en' || track.languageCode?.startsWith('en')
-    );
-
-    if (!selectedTrack) {
-      selectedTrack = captions[0];
-    }
-
-    const captionUrl = selectedTrack.baseUrl;
-    console.log(`Selected caption track: ${selectedTrack.languageCode}`);
-
-    // Step 3: Fetch the actual transcript (use CORS proxy for browser)
-    const transcriptResponse = await fetch(`${CORS_PROXY}${encodeURIComponent(captionUrl)}`);
-
-    if (!transcriptResponse.ok) {
-      throw new Error('Failed to fetch transcript');
-    }
-
-    const transcriptXml = await transcriptResponse.text();
-
-    // Step 4: Parse XML
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(transcriptXml, 'text/xml');
-    const textElements = xmlDoc.getElementsByTagName('text');
-
-    if (textElements.length === 0) {
-      throw new Error('No transcript text found');
-    }
-
-    // Step 5: Convert to transcript segments
-    const transcript: TranscriptSegment[] = [];
-    for (let i = 0; i < textElements.length; i++) {
-      const element = textElements[i];
-      const text = element.textContent || '';
-      const start = parseFloat(element.getAttribute('start') || '0');
-      const duration = parseFloat(element.getAttribute('dur') || '0');
-
-      // Decode HTML entities
-      const decodedText = text
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&#x27;/g, "'")
-        .replace(/&apos;/g, "'");
-
-      transcript.push({ text: decodedText, start, duration });
-    }
-
-    console.log(`✅ Successfully fetched ${transcript.length} transcript segments via Innertube`);
-
-    // Step 6: Merge segments into complete sentences
-    const mergedTranscript = mergeIntoSentences(transcript);
-    console.log(`📝 Merged into ${mergedTranscript.length} sentences`);
-
-    return mergedTranscript;
-
-  } catch (error: any) {
-    console.error('❌ Innertube API error:', error);
-    throw new Error(error.message || 'Failed to fetch transcript via Innertube');
   }
+
+  // All proxies failed
+  throw new Error(lastError?.message || 'Failed to fetch transcript via Innertube - all CORS proxies failed');
 }
 
 /**
