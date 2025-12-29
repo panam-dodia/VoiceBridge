@@ -176,15 +176,10 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      console.log('🎯 Fetching transcript via client-side (browser)...');
+      console.log('🎯 Fetching transcript via backend...');
 
-      // Fetch transcript client-side (browser) to bypass cloud IP blocking
-      const { fetchYouTubeTranscriptInnertube } = await import('@/lib/youtube-innertube');
-      const clientTranscript = await fetchYouTubeTranscriptInnertube(extractedId);
-      console.log(`✅ Fetched ${clientTranscript.length} transcript segments client-side`);
-
-      // Send transcript to backend for processing
-      const response = await youtubeAPI.createSession(url, userId, clientTranscript);
+      // Let backend fetch transcript directly (no client-side fetching)
+      const response = await youtubeAPI.createSession(url, userId, null);
 
       console.log('Backend response:', response);
 

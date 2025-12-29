@@ -1,14 +1,11 @@
 /**
  * YouTube Innertube API Service
  * Uses YouTube's internal API to fetch transcripts
- * Routes requests through WARP proxy to bypass IP blocking
+ * Fetches directly from backend (no browser CORS issues)
  */
 
-import { SocksProxyAgent } from 'socks-proxy-agent';
-
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
-const ANDROID_CLIENT_VERSION = '19.51.37'; // Android client version
-const WARP_PROXY_URL = process.env.WARP_PROXY_URL || 'socks5://34.46.173.108:1080';
+const WEB_CLIENT_VERSION = '2.20250110.01.00';
 
 class YouTubeInnertubeService {
   /**
@@ -16,41 +13,32 @@ class YouTubeInnertubeService {
    */
   async getTranscript(videoId) {
     try {
-      console.log(`📥 Fetching transcript via Innertube API for video: ${videoId}`);
+      console.log(`📥 Fetching transcript via Innertube API (backend) for video: ${videoId}`);
 
-      // Step 1: Get initial player data
-      // For production (Cloud Run), we'll need to use client-side fetching instead
-      // because YouTube blocks all cloud provider IPs regardless of proxy
+      // Step 1: Get initial player data - fetch directly from backend (no CORS issues)
       const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
 
-      // Create SOCKS proxy agent
-      const agent = new SocksProxyAgent(WARP_PROXY_URL);
-
-      // Use ANDROID_TESTSUITE client - bypasses bot detection
+      // Use WEB client
       const fetchOptions = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': `com.google.android.youtube/${ANDROID_CLIENT_VERSION} (Linux; U; Android 14) gzip`,
-          'X-Youtube-Client-Name': '30',  // ANDROID_TESTSUITE
-          'X-Youtube-Client-Version': ANDROID_CLIENT_VERSION,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
         body: JSON.stringify({
           context: {
             client: {
-              clientName: 'ANDROID_TESTSUITE',
-              clientVersion: ANDROID_CLIENT_VERSION,
+              clientName: 'WEB',
+              clientVersion: WEB_CLIENT_VERSION,
               hl: 'en',
               gl: 'US',
-              androidSdkVersion: 34,
             },
           },
           videoId: videoId,
         }),
-        agent: agent, // Use WARP proxy
       };
 
-      console.log(`🌐 Using WARP proxy: ${WARP_PROXY_URL}`);
+      console.log(`🌐 Fetching directly from backend (no proxy)`);
       const playerResponse = await fetch(targetUrl, fetchOptions);
 
       if (!playerResponse.ok) {
@@ -94,8 +82,8 @@ class YouTubeInnertubeService {
       const captionUrl = selectedTrack.baseUrl;
       console.log(`Selected caption track: ${selectedTrack.languageCode}`);
 
-      // Step 3: Fetch the actual transcript (through WARP proxy)
-      const transcriptResponse = await fetch(captionUrl, { agent: agent });
+      // Step 3: Fetch the actual transcript (directly from backend)
+      const transcriptResponse = await fetch(captionUrl);
 
       if (!transcriptResponse.ok) {
         throw new Error('Failed to fetch transcript');
