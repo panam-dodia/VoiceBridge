@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { youtubeAPI } from '@/lib/api';
 import { getUserId } from '@/lib/userStore';
+import { fetchYouTubeTranscriptInnertube } from '@/lib/youtube-innertube';
 
 declare global {
   interface Window {
@@ -176,10 +177,14 @@ export default function YouTubePage() {
     setError('');
 
     try {
-      console.log('🎯 Fetching transcript via backend...');
+      console.log('🎯 Fetching transcript from browser (client-side)...');
 
-      // Let backend fetch transcript directly (no client-side fetching)
-      const response = await youtubeAPI.createSession(url, userId, null);
+      // Fetch transcript from browser using user's own IP (bypasses Cloud Run IP blocking)
+      const clientTranscript = await fetchYouTubeTranscriptInnertube(extractedId);
+      console.log(`✅ Fetched ${clientTranscript.length} segments from browser`);
+
+      // Send transcript to backend for processing
+      const response = await youtubeAPI.createSession(url, userId, clientTranscript);
 
       console.log('Backend response:', response);
 
