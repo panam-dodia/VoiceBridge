@@ -33,6 +33,20 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
 
       // Step 1: Get initial player data (use CORS proxy for browser)
       const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
+      const requestBody = {
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20250110.01.00',
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        videoId: videoId,
+      };
+
+      console.log('🔍 Request body:', JSON.stringify(requestBody));
+
       const playerResponse = await fetch(
         `${corsProxy}${encodeURIComponent(targetUrl)}`,
         {
@@ -40,17 +54,7 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            context: {
-              client: {
-                clientName: 'WEB',
-                clientVersion: '2.20250110.01.00',
-                hl: 'en',
-                gl: 'US',
-              },
-            },
-            videoId: videoId,
-          }),
+          body: JSON.stringify(requestBody),
         }
       );
 
@@ -62,6 +66,7 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
 
       // Debug: Log the full response to see what we're getting
       console.log('📋 Player response keys:', Object.keys(playerData));
+      console.log('📋 Full player data:', playerData);
       console.log('📋 Captions data:', playerData?.captions);
 
       // Step 2: Extract caption tracks
