@@ -12,11 +12,13 @@ export interface TranscriptSegment {
 
 const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
 const ANDROID_CLIENT_VERSION = '19.51.37';
-// Try multiple CORS proxies in case one is down
+// Try multiple CORS proxies in case one is down (updated 2025)
 const CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',
+  'https://api.cors.lol/?url=',
+  'https://proxy.cors.sh/',
+  'https://thingproxy.freeboard.io/fetch/',
   'https://corsproxy.io/?',
-  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://api.allorigins.win/raw?url=',
 ];
 
 /**
