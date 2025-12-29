@@ -1,129 +1,40 @@
 /**
- * YouTube Innertube API Service
- * Uses YouTube's internal API to fetch transcripts
- * Fetches directly from backend (no browser CORS issues)
+ * YouTube Transcript Service
+ * Uses youtube-transcript library to bypass bot detection
  */
 
-const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'; // Public web client API key
-const WEB_CLIENT_VERSION = '2.20250110.01.00';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 class YouTubeInnertubeService {
   /**
-   * Fetch transcript using Innertube API
+   * Fetch transcript using youtube-transcript library
    */
   async getTranscript(videoId) {
     try {
-      console.log(`📥 Fetching transcript via Innertube API (backend) for video: ${videoId}`);
+      console.log(`📥 Fetching transcript via youtube-transcript library for video: ${videoId}`);
 
-      // Step 1: Get initial player data - fetch directly from backend (no CORS issues)
-      const targetUrl = `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}`;
+      // Fetch transcript using youtube-transcript library
+      // This library handles bot detection bypass automatically
+      const transcriptData = await YoutubeTranscript.fetchTranscript(videoId);
 
-      // Use WEB client
-      const fetchOptions = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        body: JSON.stringify({
-          context: {
-            client: {
-              clientName: 'WEB',
-              clientVersion: WEB_CLIENT_VERSION,
-              hl: 'en',
-              gl: 'US',
-            },
-          },
-          videoId: videoId,
-        }),
-      };
+      console.log(`✅ Successfully fetched ${transcriptData.length} transcript segments`);
 
-      console.log(`🌐 Fetching directly from backend (no proxy)`);
-      const playerResponse = await fetch(targetUrl, fetchOptions);
+      // Convert to our format
+      const transcript = transcriptData.map(item => ({
+        text: item.text,
+        start: item.offset / 1000, // Convert milliseconds to seconds
+        duration: item.duration / 1000 // Convert milliseconds to seconds
+      }));
 
-      if (!playerResponse.ok) {
-        throw new Error(`Failed to fetch player data: ${playerResponse.status}`);
-      }
-
-      const playerData = await playerResponse.json();
-
-      // Log response for debugging
-      console.log('Player response keys:', Object.keys(playerData));
-      if (playerData.playabilityStatus) {
-        console.log('Playability status:', playerData.playabilityStatus.status);
-        if (playerData.playabilityStatus.reason) {
-          console.log('Playability reason:', playerData.playabilityStatus.reason);
-        }
-      }
-
-      // Step 2: Extract caption tracks
-      const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-      if (!captions || captions.length === 0) {
-        console.log('Captions path check:', {
-          hasCaptions: !!playerData.captions,
-          hasRenderer: !!playerData.captions?.playerCaptionsTracklistRenderer,
-          hasTracks: !!playerData.captions?.playerCaptionsTracklistRenderer?.captionTracks
-        });
-        throw new Error('No captions available for this video');
-      }
-
-      console.log(`Found ${captions.length} caption tracks`);
-
-      // Find English track or use first available
-      let selectedTrack = captions.find(
-        (track) => track.languageCode === 'en' || track.languageCode?.startsWith('en')
-      );
-
-      if (!selectedTrack) {
-        selectedTrack = captions[0];
-      }
-
-      const captionUrl = selectedTrack.baseUrl;
-      console.log(`Selected caption track: ${selectedTrack.languageCode}`);
-
-      // Step 3: Fetch the actual transcript (directly from backend)
-      const transcriptResponse = await fetch(captionUrl);
-
-      if (!transcriptResponse.ok) {
-        throw new Error('Failed to fetch transcript');
-      }
-
-      const transcriptXml = await transcriptResponse.text();
-
-      // Step 4: Parse XML (simple regex parsing for Node.js)
-      const textMatches = transcriptXml.matchAll(/<text start="([^"]+)" dur="([^"]+)"[^>]*>([^<]+)<\/text>/g);
-
-      const transcript = [];
-      for (const match of textMatches) {
-        const start = parseFloat(match[1]);
-        const duration = parseFloat(match[2]);
-        let text = match[3];
-
-        // Decode HTML entities
-        text = text
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&#x27;/g, "'")
-          .replace(/&apos;/g, "'");
-
-        transcript.push({ text, start, duration });
-      }
-
-      console.log(`✅ Successfully fetched ${transcript.length} transcript segments via Innertube`);
-
-      // Step 5: Merge segments into complete sentences
+      // Merge segments into complete sentences
       const mergedTranscript = this.mergeIntoSentences(transcript);
       console.log(`📝 Merged into ${mergedTranscript.length} sentences`);
 
       return mergedTranscript;
 
     } catch (error) {
-      console.error('❌ Innertube API error:', error.message);
-      throw error;
+      console.error('❌ YouTube transcript error:', error.message);
+      throw new Error('Failed to fetch transcript. Video may not have captions or may be restricted.');
     }
   }
 
