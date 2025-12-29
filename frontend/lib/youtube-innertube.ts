@@ -60,6 +60,10 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
 
         const playerData = await playerResponse.json();
 
+      // Debug: Log the full response to see what we're getting
+      console.log('📋 Player response keys:', Object.keys(playerData));
+      console.log('📋 Captions data:', playerData?.captions);
+
       // Step 2: Extract caption tracks
       const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
