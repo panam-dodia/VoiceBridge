@@ -43,11 +43,10 @@ export async function fetchYouTubeTranscriptInnertube(videoId: string): Promise<
           body: JSON.stringify({
             context: {
               client: {
-                clientName: 'ANDROID',
-                clientVersion: ANDROID_CLIENT_VERSION,
+                clientName: 'WEB',
+                clientVersion: '2.20250110.01.00',
                 hl: 'en',
                 gl: 'US',
-                androidSdkVersion: 34,
               },
             },
             videoId: videoId,
